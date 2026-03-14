@@ -17,7 +17,6 @@ if os.path.exists(auto_data_path):
     file_path = auto_data_path
     st.sidebar.success("✅ 자동 업데이트된 최신 데이터를 표시 중입니다.")
 else:
-    # 자동 파일이 없을 경우 기존 csv 중 가장 최신 것 사용
     csv_files = sorted([f for f in os.listdir(data_dir) if f.endswith('.csv')], reverse=True) if os.path.exists(data_dir) else []
     file_path = os.path.join(data_dir, csv_files[0]) if csv_files else None
     st.sidebar.info("ℹ️ 기존 업로드된 데이터를 표시 중입니다.")
@@ -27,7 +26,6 @@ if file_path:
         df = pd.read_csv(file_path)
         
         # --- 데이터 전처리 ---
-        # 날짜 처리
         if 'timestamp' in df.columns:
             df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
             df = df.dropna(subset=['timestamp'])
@@ -35,12 +33,9 @@ if file_path:
         else:
             df['date_only'] = pd.Timestamp.now().date()
 
-        # 조회수 및 좋아요 컬럼 숫자형 변환
-        view_col = next((c for c in ['videoPlayCount', 'playCount', 'viewCount'] if c in df.columns), None)
-        like_col = next((c for c in ['likesCount', 'likes'] if c in df.columns), None)
-        
-        df['view_count'] = pd.to_numeric(df[view_col], errors='coerce').fillna(0) if view_col else 0
-        df['like_count'] = pd.to_numeric(df[like_col], errors='coerce').fillna(0) if like_col else 0
+        # 컬럼 이름이 유동적이므로 안전하게 가져오기
+        df['view_count'] = pd.to_numeric(df.get('videoPlayCount', 0), errors='coerce').fillna(0)
+        df['like_count'] = pd.to_numeric(df.get('likesCount', 0), errors='coerce').fillna(0)
 
         # 사이드바 필터
         st.sidebar.header("🔍 필터링 설정")
@@ -64,16 +59,16 @@ if file_path:
         m3.metric("총 좋아요 (피드)", f"{int(df['like_count'].sum()):,}개")
         m4.metric("평균 조회수", f"{int(df['view_count'].mean()):,}회")
 
-        # 성과 그래프
         col_g1, col_g2 = st.columns(2)
         with col_g1:
             daily_stats = df.groupby('date_only')[['view_count', 'like_count']].sum().reset_index()
             fig = px.line(daily_stats, x='date_only', y='view_count', title="일자별 조회수 트렌드", markers=True)
             st.plotly_chart(fig, use_container_width=True)
         with col_g2:
-            top_acc = df.groupby('ownerUsername')['view_count'].sum().sort_values(ascending=False).head(10).reset_index()
-            fig2 = px.bar(top_acc, x='view_count', y='ownerUsername', orientation='h', title="영향력 TOP 10 계정", color='view_count')
-            st.plotly_chart(fig2, use_container_width=True)
+            if not df.empty and 'ownerUsername' in df.columns:
+                top_acc = df.groupby('ownerUsername')['view_count'].sum().sort_values(ascending=False).head(10).reset_index()
+                fig2 = px.bar(top_acc, x='view_count', y='ownerUsername', orientation='h', title="영향력 TOP 10 계정", color='view_count')
+                st.plotly_chart(fig2, use_container_width=True)
 
         st.divider()
 
@@ -83,9 +78,7 @@ if file_path:
         tab1, tab2 = st.tabs(["✨ 메이투 (Meitu)", "📸 뷰티캠 (BeautyCam)"])
 
         def display_brand_grid(brand_keywords, brand_name):
-            # 해당 브랜드 키워드가 포함된 데이터 필터링
             target = df[df['caption'].str.contains('|'.join(brand_keywords), case=False)]
-            
             if not target.empty:
                 # 키워드 분석
                 all_text = " ".join(target['caption'].tolist())
@@ -99,8 +92,7 @@ if file_path:
                 
                 st.write("---")
                 
-                # [강화된 분류 로직]
-                # 1. 릴스: update_data.py에서 만든 커스텀 플래그가 있으면 사용, 없으면 조회수 0보다 큰 것
+                # 릴스/피드 분류 (is_reels_custom 우선 사용)
                 if 'is_reels_custom' in target.columns:
                     reels = target[target['is_reels_custom'] == True].sort_values(by='view_count', ascending=False).head(10)
                     feeds = target[target['is_reels_custom'] == False].sort_values(by='like_count', ascending=False).head(10)
@@ -115,24 +107,28 @@ if file_path:
                     if not reels.empty:
                         for _, row in reels.iterrows():
                             with st.container(border=True):
-                                if pd.notna(row.get('displayUrl')): st.image(row['displayUrl'], use_container_width=True)
+                                img_url = row.get('displayUrl', '')
+                                if pd.notna(img_url) and str(img_url).startswith('http'):
+                                    st.image(img_url, use_container_width=True)
                                 st.write(f"**@{row.get('ownerUsername', 'unknown')}**")
                                 st.write(f"🔥 조회수: **{int(row['view_count']):,}회**")
                                 st.link_button("영상 보기", row.get('url', '#'))
                     else:
-                        st.info("조건에 맞는 릴스 데이터가 없습니다.")
+                        st.info("릴스 데이터를 수집 중입니다.")
 
                 with col_right:
                     st.markdown("#### 📸 인기 피드 (좋아요 기준)")
                     if not feeds.empty:
                         for _, row in feeds.iterrows():
                             with st.container(border=True):
-                                if pd.notna(row.get('displayUrl')): st.image(row['displayUrl'], use_container_width=True)
+                                img_url = row.get('displayUrl', '')
+                                if pd.notna(img_url) and str(img_url).startswith('http'):
+                                    st.image(img_url, use_container_width=True)
                                 st.write(f"**@{row.get('ownerUsername', 'unknown')}**")
                                 st.write(f"❤️ 좋아요: **{int(row['like_count']):,}개**")
                                 st.link_button("게시물 보기", row.get('url', '#'))
                     else:
-                        st.info("조건에 맞는 피드 데이터가 없습니다.")
+                        st.info("피드 데이터를 수집 중입니다.")
             else:
                 st.warning(f"{brand_name} 데이터가 없습니다.")
 
@@ -144,4 +140,4 @@ if file_path:
     except Exception as e:
         st.error(f"데이터를 표시하는 중 오류가 발생했습니다: {e}")
 else:
-    st.error("데이터 파일을 찾을 수 없습니다. GitHub Actions 실행 여부를 확인하세요.")
+    st.error("데이터 파일을 찾을 수 없습니다.")

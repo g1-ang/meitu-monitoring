@@ -19,9 +19,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-glx
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          pip install pandas apify-client  # 로봇 실행에 꼭 필요한 것만 먼저 설치
 
       - name: Run update script
         env:
@@ -32,6 +31,6 @@ jobs:
         run: |
           git config --global user.name "GitHub Action"
           git config --global user.email "action@github.com"
-          git add data/*.csv || echo "No csv files to add"
+          git add data/latest_monitoring.csv || echo "No file to add"
           git commit -m "Auto-update data" || echo "No changes to commit"
           git push

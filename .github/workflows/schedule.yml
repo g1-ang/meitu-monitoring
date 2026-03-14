@@ -1,0 +1,36 @@
+name: Weekly Data Update
+
+on:
+  schedule:
+    # 매주 월요일 아침 00:00 (UTC) = 한국 시간 오전 09:00
+    - cron: '0 0 * * 1'
+  workflow_dispatch: # 수동으로 수집 버튼을 누르기 위한 기능
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install apify-client pandas
+
+      - name: Run update script
+        env:
+          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+        run: python update_data.py
+
+      - name: Commit and Push changes
+        run: |
+          git config --global user.name 'GitHub Action'
+          git config --global user.email 'action@github.com'
+          git add data/latest_monitoring.csv
+          git commit -m "Auto-update data from Apify" || exit 0
+          git push

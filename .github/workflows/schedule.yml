@@ -35,11 +35,11 @@ jobs:
           git config --global user.name "GitHub Action"
           git config --global user.email "action@github.com"
           
-          # 파일이 있는지 확인하고 강제로 추가
+          # data 폴더 전체를 강제로 스테이징
           git add data/latest_monitoring.csv
           
-          # [핵심] --allow-empty를 써서 변경사항이 없다고 판단되어도 무조건 커밋 기록을 남깁니다.
-          git commit --allow-empty -m "Auto-update data: $(date +'%Y-%m-%d %H:%M:%S')"
+          # 변경사항이 있든 없든(시간 컬럼 때문에 무조건 생김) 강제로 커밋
+          git commit -m "Weekly Auto-Update: $(date)" || exit 0
           
-          # 강제로 밀어넣기
+          # 현재 브랜치로 강제 푸시
           git push origin main

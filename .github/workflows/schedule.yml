@@ -8,7 +8,6 @@ on:
 jobs:
   update:
     runs-on: ubuntu-latest
-    # [중요] 쓰기 권한을 명시적으로 부여합니다
     permissions:
       contents: write
     
@@ -35,8 +34,12 @@ jobs:
         run: |
           git config --global user.name "GitHub Action"
           git config --global user.email "action@github.com"
-          # data 폴더의 변경사항을 강제로 추가
+          
+          # 파일이 있는지 확인하고 강제로 추가
           git add data/latest_monitoring.csv
-          # 변경사항이 있으면 커밋, 없으면 건너뜀
-          git commit -m "Auto-update data [$(date)]" || exit 0
+          
+          # [핵심] --allow-empty를 써서 변경사항이 없다고 판단되어도 무조건 커밋 기록을 남깁니다.
+          git commit --allow-empty -m "Auto-update data: $(date +'%Y-%m-%d %H:%M:%S')"
+          
+          # 강제로 밀어넣기
           git push origin main

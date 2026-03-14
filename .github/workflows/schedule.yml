@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # 모든 기록을 다 가져와서 충돌 방지
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -35,11 +37,10 @@ jobs:
           git config --global user.name "GitHub Action"
           git config --global user.email "action@github.com"
           
-          # data 폴더 전체를 강제로 스테이징
           git add data/latest_monitoring.csv
           
-          # 변경사항이 있든 없든(시간 컬럼 때문에 무조건 생김) 강제로 커밋
+          # 변경사항이 없어도 시간값이 바뀌므로 무조건 커밋됩니다.
           git commit -m "Weekly Auto-Update: $(date)" || exit 0
           
-          # 현재 브랜치로 강제 푸시
-          git push origin main
+          # [핵심] 강제로 덮어씌우기 (force push)
+          git push origin main --force

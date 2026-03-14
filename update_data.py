@@ -5,7 +5,7 @@ from apify_client import ApifyClient
 # 설정
 APIFY_TOKEN = os.getenv('APIFY_API_TOKEN')
 ACTOR_ID = "apify/instagram-hashtag-scraper"
-KEYWORDS = ["#메이투", "#뷰티캠", "#meitu", "#beautycam"]
+KEYWORDS = ["메이투", "뷰티캠", "meitu", "beautycam"]
 
 def fetch_data():
     client = ApifyClient(APIFY_TOKEN)

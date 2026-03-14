@@ -2,8 +2,8 @@ name: Weekly Data Update
 
 on:
   schedule:
-    - cron: '0 0 * * 1' # 매주 월요일 아침 9시 (KST 기준)
-  workflow_dispatch: # 수동 실행 버튼용
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
 
 jobs:
   update:
@@ -21,7 +21,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgl1-mesa-glx
-          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Run update script
@@ -33,6 +32,6 @@ jobs:
         run: |
           git config --global user.name "GitHub Action"
           git config --global user.email "action@github.com"
-          git add data/latest_monitoring.csv
-          git commit -m "Auto-update data from Apify" || echo "No changes to commit"
+          git add data/*.csv || echo "No csv files to add"
+          git commit -m "Auto-update data" || echo "No changes to commit"
           git push

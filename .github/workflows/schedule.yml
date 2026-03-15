@@ -3,19 +3,18 @@ name: Weekly Data Update
 on:
   schedule:
     - cron: '0 0 * * 1'
-  workflow_dispatch:
+  workflow_dispatch: # 직접 실행 버튼용
 
 jobs:
   update:
     runs-on: ubuntu-latest
+    # [핵심] 깃허브 로봇에게 쓰기 권한을 명시적으로 부여합니다.
     permissions:
-      contents: write # 이 부분이 로봇에게 파일 쓰기 권한을 줍니다.
+      contents: write
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -24,7 +23,6 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install pandas apify-client
 
       - name: Run update script
@@ -34,14 +32,13 @@ jobs:
 
       - name: Commit and Push changes
         run: |
-          git config --global user.name "GitHub Action"
-          git config --global user.email "action@github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # 파일이 바뀐 게 있는지 확인하고 강제로 스테이징
           git add data/latest_monitoring.csv
           
-          # 변경사항이 있든 없든(시간 값이 포함되어 무조건 생김) 커밋
-          git commit -m "Auto-update data: $(date)" || echo "No changes to commit"
+          # 변경사항이 있든 없든 무조건 커밋하도록 만듭니다.
+          git commit -m "Auto-update data: $(date)" || exit 0
           
-          # 꼬여있는 경로를 무시하고 현재 메인 브랜치에 강제로 밀어넣기
+          # 현재 브랜치에 강제로 밀어넣기
           git push origin main --force

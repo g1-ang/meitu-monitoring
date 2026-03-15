@@ -9,13 +9,13 @@ jobs:
   update:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # 이 부분이 로봇에게 파일 쓰기 권한을 줍니다.
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0 # 모든 기록을 다 가져와서 충돌 방지
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -37,10 +37,11 @@ jobs:
           git config --global user.name "GitHub Action"
           git config --global user.email "action@github.com"
           
+          # 파일이 바뀐 게 있는지 확인하고 강제로 스테이징
           git add data/latest_monitoring.csv
           
-          # 변경사항이 없어도 시간값이 바뀌므로 무조건 커밋됩니다.
-          git commit -m "Weekly Auto-Update: $(date)" || exit 0
+          # 변경사항이 있든 없든(시간 값이 포함되어 무조건 생김) 커밋
+          git commit -m "Auto-update data: $(date)" || echo "No changes to commit"
           
-          # [핵심] 강제로 덮어씌우기 (force push)
+          # 꼬여있는 경로를 무시하고 현재 메인 브랜치에 강제로 밀어넣기
           git push origin main --force

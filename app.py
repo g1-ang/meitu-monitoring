@@ -1,91 +1,96 @@
 import streamlit as st
 import pandas as pd
 import os
+import re
 
 # 1. 페이지 설정
-st.set_page_config(page_title="메이투 모니터링", layout="wide")
-st.title("🚀 메이투 즉각 모니터링 자동화")
+st.set_page_config(page_title="메이투 마케팅 모니터링", layout="wide")
+st.title("🚀 메이투 즉각 모니터링 자동화 시스템")
 
 # 2. 파일 불러오기
 data_path = './data/latest_monitoring.csv'
 
 if os.path.exists(data_path):
     try:
-        # 데이터 읽기
         df = pd.read_csv(data_path)
         
-        # [에러 해결 핵심] replace 대신 fillna만 사용하여 안전하게 변환
-        def clean_num(df, col_names):
-            # 후보 컬럼들 중 실제로 있는 것 하나를 찾음
-            found_col = None
-            for c in col_names:
-                if c in df.columns:
-                    found_col = c
-                    break
-            
-            if found_col is not None:
-                # 찾았다면 숫자로 변환하고 비어있으면 0으로 채움
-                return pd.to_numeric(df[found_col], errors='coerce').fillna(0).astype(int)
-            else:
-                # 아예 컬럼이 없으면 0으로 채운 리스트 반환
-                return [0] * len(df)
+        # --- [복구 1] 날짜 데이터 처리 ---
+        # timestamp나 last_updated 중 있는 것을 사용합니다.
+        time_col = 'timestamp' if 'timestamp' in df.columns else ('last_updated' if 'last_updated' in df.columns else None)
+        if time_col:
+            df['date_only'] = pd.to_datetime(df[time_col], errors='coerce').dt.date
+        else:
+            df['date_only'] = pd.Timestamp.now().date()
 
-        # 조회수와 좋아요 처리
+        # --- 숫자 데이터 안전 변환 ---
+        def clean_num(df, col_names):
+            found_col = next((c for c in col_names if c in df.columns), None)
+            return pd.to_numeric(df[found_col], errors='coerce').fillna(0).astype(int) if found_col else pd.Series([0]*len(df))
+
         df['view_count'] = clean_num(df, ['videoPlayCount', 'playCount'])
         df['like_count'] = clean_num(df, ['likesCount', 'likes'])
-        
-        # 캡션 처리 (글자)
         df['caption'] = df['caption'].fillna('').astype(str)
 
-        # 3. 화면 표시 (요약 수치)
+        # --- [복구 2] 릴스 판별 로직 강화 ---
+        # 조회수가 0보다 크거나, 유형이 Video인 경우 릴스로 판단
+        df['is_reels'] = (df['view_count'] > 0) | (df.get('type') == 'Video')
+
+        # --- [복구 3] 필터링 기능 (사이드바) ---
+        st.sidebar.header("🔍 필터링 설정")
+        korean_only = st.sidebar.checkbox("한국 콘텐츠만 보기 (한글 포함)", value=True)
+        
+        # 날짜 필터
+        min_date = df['date_only'].min() if not df.empty else pd.Timestamp.now().date()
+        max_date = df['date_only'].max() if not df.empty else pd.Timestamp.now().date()
+        date_range = st.sidebar.date_input("조회 기간", value=(min_date, max_date))
+
+        # 필터 적용
+        display_df = df.copy()
+        if korean_only:
+            display_df = display_df[display_df['caption'].str.contains('[가-힣]', regex=True)]
+        if isinstance(date_range, tuple) and len(date_range) == 2:
+            display_df = display_df[(display_df['date_only'] >= date_range[0]) & (display_df['date_only'] <= date_range[1])]
+
+        # 성과 요약
         m1, m2, m3 = st.columns(3)
-        m1.metric("총 수집 콘텐츠", f"{len(df)}개")
-        m2.metric("총 조회수 (릴스)", f"{int(df['view_count'].sum()):,}회")
-        m3.metric("총 좋아요 (피드)", f"{int(df['like_count'].sum()):,}개")
+        m1.metric("수집 콘텐츠", f"{len(display_df)}개")
+        m2.metric("총 조회수", f"{int(display_df['view_count'].sum()):,}회")
+        m3.metric("총 좋아요", f"{int(display_df['like_count'].sum()):,}개")
 
         st.divider()
 
-        # 4. 브랜드별 탭
+        # --- 브랜드 탭 구성 ---
         tab1, tab2 = st.tabs(["✨ 메이투 (Meitu)", "📸 뷰티캠 (BeautyCam)"])
 
         def show_grid(brand_kw):
-            target = df[df['caption'].str.contains('|'.join(brand_kw), case=False, na=False)]
+            target = display_df[display_df['caption'].str.contains('|'.join(brand_kw), case=False, na=False)]
             
-            if target.empty:
-                st.info(f"{brand_kw[0]} 관련 데이터가 아직 없습니다.")
-                return
-
-            # 릴스(조회수 중심) vs 피드(좋아요 중심)
-            reels = target[target['view_count'] > 0].sort_values('view_count', ascending=False).head(12)
-            feeds = target[target['view_count'] == 0].sort_values('like_count', ascending=False).head(12)
+            # 릴스(동영상)와 피드를 구분하여 정렬
+            reels = target[target['is_reels'] == True].sort_values('view_count', ascending=False).head(12)
+            feeds = target[target['is_reels'] == False].sort_values('like_count', ascending=False).head(12)
 
             col1, col2 = st.columns(2)
             with col1:
-                st.subheader("🎬 인기 릴스")
-                for _, row in reels.iterrows():
+                st.subheader("🎬 인기 릴스 (동영상)")
+                for _, r in reels.iterrows():
                     with st.container(border=True):
-                        img = row.get('displayUrl')
-                        if pd.notna(img) and str(img).startswith('http'): 
-                            st.image(img, use_container_width=True)
-                        st.write(f"**@{row.get('ownerUsername', 'user')}**")
-                        st.write(f"🔥 조회수: {int(row['view_count']):,}회")
-                        st.link_button("영상 보기", row.get('url', '#'))
-
+                        if pd.notna(r.get('displayUrl')): st.image(r['displayUrl'], use_container_width=True)
+                        st.caption(f"📅 날짜: {r['date_only']}")
+                        st.write(f"**@{r.get('ownerUsername', 'user')}** | 🔥 {int(r['view_count']):,}")
+                        st.link_button("영상 보기", r.get('url', '#'))
             with col2:
-                st.subheader("📸 인기 피드")
-                for _, row in feeds.iterrows():
+                st.subheader("📸 인기 피드 (게시글)")
+                for _, r in feeds.iterrows():
                     with st.container(border=True):
-                        img = row.get('displayUrl')
-                        if pd.notna(img) and str(img).startswith('http'): 
-                            st.image(img, use_container_width=True)
-                        st.write(f"**@{row.get('ownerUsername', 'user')}**")
-                        st.write(f"❤️ 좋아요: {int(row['like_count']):,}개")
-                        st.link_button("게시물 보기", row.get('url', '#'))
+                        if pd.notna(r.get('displayUrl')): st.image(r['displayUrl'], use_container_width=True)
+                        st.caption(f"📅 날짜: {r['date_only']}")
+                        st.write(f"**@{r.get('ownerUsername', 'user')}** | ❤️ {int(r['like_count']):,}")
+                        st.link_button("게시물 보기", r.get('url', '#'))
 
         with tab1: show_grid(['메이투', 'meitu'])
         with tab2: show_grid(['뷰티캠', 'beautycam'])
 
     except Exception as e:
-        st.error(f"⚠️ 대시보드 구성 중 오류 발생: {e}")
+        st.error(f"⚠️ 기능 복구 중 오류 발생: {e}")
 else:
-    st.error("📂 데이터 파일을 찾을 수 없습니다. GitHub에서 데이터 수집이 완료되었는지 확인해 주세요.")
+    st.error("📂 파일을 찾을 수 없습니다.")

@@ -2,78 +2,70 @@ import streamlit as st
 import pandas as pd
 import os
 import re
-from collections import Counter
-import plotly.express as px
 
 # 1. 페이지 설정
-st.set_page_config(page_title="메이투 마케팅 실시간 대시보드", layout="wide")
-st.title("🚀 메이투 즉각 모니터링 자동화 시스템")
+st.set_page_config(page_title="메이투 모니터링", layout="wide")
+st.title("🚀 메이투 즉각 모니터링 자동화")
 
-# 2. 파일 불러오기 로직
-data_dir = './data'
-auto_data_path = os.path.join(data_dir, 'latest_monitoring.csv')
+# 2. 파일 불러오기
+data_path = './data/latest_monitoring.csv'
 
-if os.path.exists(auto_data_path):
-    file_path = auto_data_path
-    st.sidebar.success("✅ 자동 업데이트된 최신 데이터를 표시 중입니다.")
-else:
-    csv_files = sorted([f for f in os.listdir(data_dir) if f.endswith('.csv')], reverse=True) if os.path.exists(data_dir) else []
-    file_path = os.path.join(data_dir, csv_files[0]) if csv_files else None
-    st.sidebar.info("ℹ️ 기존 업로드된 데이터를 표시 중입니다.")
-
-if file_path:
+if os.path.exists(data_path):
     try:
-        # 데이터 읽기
-        df = pd.read_csv(file_path)
+        df = pd.read_csv(data_path)
         
-        # --- 데이터 전처리 (에러 방지 강화) ---
-        if 'timestamp' in df.columns:
-            df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
-            df = df.dropna(subset=['timestamp'])
-            df['date_only'] = df['timestamp'].dt.date
-        else:
-            df['date_only'] = pd.Timestamp.now().date()
-
-        # [수정된 부분] 숫자 변환 로직을 더 안전하게 변경
-        def safe_numeric(series):
-            return pd.to_numeric(series, errors='coerce').fillna(0).astype(int)
-
-        df['view_count'] = safe_numeric(df.get('videoPlayCount', 0))
-        df['like_count'] = safe_numeric(df.get('likesCount', 0))
-
-        # 사이드바 필터
-        st.sidebar.header("🔍 필터링 설정")
-        korean_only = st.sidebar.checkbox("한국 콘텐츠만 보기", value=True)
-        
-        # 날짜 범위 설정 안전하게
-        min_date = df['date_only'].min() if not df.empty else pd.Timestamp.now().date()
-        max_date = df['date_only'].max() if not df.empty else pd.Timestamp.now().date()
-        date_range = st.sidebar.date_input("조회 기간", value=(min_date, max_date))
-
-        # 필터링 적용
+        # 숫자 데이터 안전하게 변환
+        df['view_count'] = pd.to_numeric(df.get('videoPlayCount', 0), errors='coerce').fillna(0).astype(int)
+        df['like_count'] = pd.to_numeric(df.get('likesCount', 0), errors='coerce').fillna(0).astype(int)
         df['caption'] = df['caption'].fillna('')
+
+        # 한국 콘텐츠 필터 (사이드바)
+        korean_only = st.sidebar.checkbox("한국 콘텐츠만 보기", value=True)
         if korean_only:
             df = df[df['caption'].str.contains('[가-힣]', regex=True)]
-        if isinstance(date_range, tuple) and len(date_range) == 2:
-            df = df[(df['date_only'] >= date_range[0]) & (df['date_only'] <= date_range[1])]
 
         # ---------------------------------------------------------
-        # 📈 성과 요약 대시보드
+        # 요약 수치
         # ---------------------------------------------------------
-        st.subheader("📈 성과 요약 분석")
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("총 수집 콘텐츠", f"{len(df)}개")
-        m2.metric("총 조회수 (릴스)", f"{int(df['view_count'].sum()):,}회")
-        m3.metric("총 좋아요 (피드)", f"{int(df['like_count'].sum()):,}개")
-        m4.metric("평균 조회수", f"{int(df['view_count'].mean()):,}회")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("총 수집", f"{len(df)}개")
+        m2.metric("총 조회수", f"{df['view_count'].sum():,}회")
+        m3.metric("총 좋아요", f"{df['like_count'].sum():,}개")
 
-        if not df.empty:
-            col_g1, col_g2 = st.columns(2)
-            with col_g1:
-                daily_stats = df.groupby('date_only')[['view_count', 'like_count']].sum().reset_index()
-                fig = px.line(daily_stats, x='date_only', y='view_count', title="일자별 조회수 트렌드", markers=True)
-                st.plotly_chart(fig, use_container_width=True)
-            with col_g2:
-                if 'ownerUsername' in df.columns:
-                    top_acc = df.groupby('ownerUsername')['view_count'].sum().sort_values(ascending=False).head(10).reset_index()
-                    fig2 = px.bar(top_acc, x='view_count', y='ownerUsername', orientation='h', title="영향력 TOP 10 계
+        st.divider()
+
+        # ---------------------------------------------------------
+        # 브랜드 탭 (메이투 / 뷰티캠)
+        # ---------------------------------------------------------
+        tab1, tab2 = st.tabs(["✨ 메이투", "📸 뷰티캠"])
+
+        def show_grid(brand_kw):
+            target = df[df['caption'].str.contains('|'.join(brand_kw), case=False)]
+            
+            # 릴스(조회수 > 0) vs 피드(조회수 == 0)
+            reels = target[target['view_count'] > 0].sort_values('view_count', ascending=False).head(10)
+            feeds = target[target['view_count'] == 0].sort_values('like_count', ascending=False).head(10)
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("🎬 인기 릴스")
+                for _, row in reels.iterrows():
+                    with st.container(border=True):
+                        if pd.notna(row.get('displayUrl')): st.image(row['displayUrl'], use_container_width=True)
+                        st.write(f"**@{row.get('ownerUsername', 'user')}** | 🔥 {row['view_count']:,}")
+                        st.link_button("영상 보기", row.get('url', '#'))
+            with col2:
+                st.subheader("📸 인기 피드")
+                for _, row in feeds.iterrows():
+                    with st.container(border=True):
+                        if pd.notna(row.get('displayUrl')): st.image(row['displayUrl'], use_container_width=True)
+                        st.write(f"**@{row.get('ownerUsername', 'user')}** | ❤️ {row['like_count']:,}")
+                        st.link_button("게시물 보기", row.get('url', '#'))
+
+        with tab1: show_grid(['메이투', 'meitu'])
+        with tab2: show_grid(['뷰티캠', 'beautycam'])
+
+    except Exception as e:
+        st.error(f"데이터 분석 중 오류 발생: {e}")
+else:
+    st.error("데이터 파일을 찾을 수 없습니다. GitHub에서 'Run workflow'가 성공했는지 확인해 주세요.")

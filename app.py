@@ -16,7 +16,6 @@ TYPE_LABEL = {
     "video_feed": "피드(동영상)",
 }
 
-# 광고 키워드 목록
 AD_KEYWORDS = [
     "광고", "유료광고", "유료_광고", "ad", "sponsored", "collaboration",
     "콜라보", "협찬", "제공", "paid", "promotion"
@@ -36,10 +35,8 @@ def detect_country(text: str) -> str:
 
 
 def detect_ad(text: str) -> str:
-    """캡션에 광고 키워드가 있으면 '광고', 없으면 '오가닉'"""
     t = str(text).lower()
     for kw in AD_KEYWORDS:
-        # #광고 형태 또는 단독 단어로 포함된 경우
         if f"#{kw.lower()}" in t or f" {kw.lower()} " in t or t.startswith(kw.lower()):
             return "📢 광고"
     return "🌱 오가닉"
@@ -56,7 +53,6 @@ def load_data():
     df["last_updated"] = pd.to_datetime(df.get("last_updated", ""), errors="coerce")
     df["engagement"]   = df["likesCount"] + df["commentsCount"]
 
-    # content_type 재분류
     def classify(row):
         product_type = str(row.get("productType", "")).lower().strip()
         media_type   = str(row.get("type", "")).lower().strip()
@@ -74,9 +70,8 @@ def load_data():
 
     df["content_type"] = df.apply(classify, axis=1)
     df = df[~df["content_type"].isin(["carousel_item", "unknown"])].reset_index(drop=True)
-    df["type_label"] = df["content_type"].map(TYPE_LABEL).fillna("기타")
+    df["type_label"]  = df["content_type"].map(TYPE_LABEL).fillna("기타")
 
-    # 캡션 정리
     if "caption" in df.columns:
         df["caption"] = (
             df["caption"].astype(str)
@@ -85,9 +80,8 @@ def load_data():
             .str.strip()
         )
 
-    # 국가 + 광고 여부 감지
-    df["country"]  = df.get("caption", "").apply(detect_country)
-    df["ad_type"]  = df.get("caption", "").apply(detect_ad)
+    df["country"]   = df.get("caption", "").apply(detect_country)
+    df["ad_type"]   = df.get("caption", "").apply(detect_ad)
     df["is_korean"] = df["country"] == "🇰🇷 한국"
 
     return df
@@ -100,50 +94,57 @@ def fmt(n):
     return str(n)
 
 
-def sidebar(df):
-    with st.sidebar:
-        st.header("🔍 필터")
+def render_filters(df):
+    """사이드바 대신 페이지 상단 필터 (모바일 친화적)"""
+    with st.expander("🔍 필터 열기", expanded=False):
+        col1, col2, col3 = st.columns(3)
 
-        # 광고/오가닉 필터
-        ad_options = sorted(df["ad_type"].unique())
-        sel_ad = st.multiselect("콘텐츠 성격", ad_options, default=ad_options)
-        df = df[df["ad_type"].isin(sel_ad)]
+        with col1:
+            ad_options = sorted(df["ad_type"].unique())
+            sel_ad = st.multiselect("콘텐츠 성격", ad_options, default=ad_options, key="ad")
 
-        # 국가 필터
-        countries = sorted(df["country"].unique())
-        sel_country = st.multiselect("국가", countries, default=countries)
-        df = df[df["country"].isin(sel_country)]
+            countries = sorted(df["country"].unique())
+            sel_country = st.multiselect("국가", countries, default=countries, key="country")
 
-        # 콘텐츠 유형
-        labels = sorted(df["type_label"].unique())
-        sel_type = st.multiselect("콘텐츠 유형", labels, default=labels)
-        df = df[df["type_label"].isin(sel_type)]
+        with col2:
+            labels = sorted(df["type_label"].unique())
+            sel_type = st.multiselect("콘텐츠 유형", labels, default=labels, key="type")
 
-        # 날짜 범위
-        if df["timestamp"].notna().any():
-            min_d = df["timestamp"].min().date()
-            max_d = df["timestamp"].max().date()
-            d = st.date_input("게시 기간", (min_d, max_d), min_value=min_d, max_value=max_d)
-            if isinstance(d, (list, tuple)) and len(d) == 2:
-                df = df[
-                    (df["timestamp"].dt.date >= d[0]) &
-                    (df["timestamp"].dt.date <= d[1])
-                ]
+            if "search_keyword" in df.columns:
+                kws = sorted(df["search_keyword"].dropna().unique())
+                sel_kw = st.multiselect("수집 키워드", kws, default=kws, key="kw")
+            else:
+                sel_kw = []
 
-        # 키워드
-        if "search_keyword" in df.columns:
-            kws = sorted(df["search_keyword"].dropna().unique())
-            sel_kw = st.multiselect("수집 키워드", kws, default=kws)
-            df = df[df["search_keyword"].isin(sel_kw)]
+        with col3:
+            if df["timestamp"].notna().any():
+                min_d = df["timestamp"].min().date()
+                max_d = df["timestamp"].max().date()
+                d = st.date_input("게시 기간", (min_d, max_d), min_value=min_d, max_value=max_d)
+            else:
+                d = None
 
-        st.divider()
-        st.caption(f"필터 결과: **{len(df):,}건**")
-        st.download_button(
-            "📥 CSV 다운로드",
-            df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
-            "meitu_monitoring.csv", "text/csv",
-            use_container_width=True,
-        )
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.download_button(
+                "📥 CSV 다운로드",
+                df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
+                "meitu_monitoring.csv", "text/csv",
+                use_container_width=True,
+            )
+
+    # 필터 적용
+    df = df[df["ad_type"].isin(sel_ad)]
+    df = df[df["country"].isin(sel_country)]
+    df = df[df["type_label"].isin(sel_type)]
+    if sel_kw:
+        df = df[df["search_keyword"].isin(sel_kw)]
+    if d and isinstance(d, (list, tuple)) and len(d) == 2:
+        df = df[
+            (df["timestamp"].dt.date >= d[0]) &
+            (df["timestamp"].dt.date <= d[1])
+        ]
+
+    st.caption(f"필터 결과: **{len(df):,}건**")
     return df
 
 
@@ -154,6 +155,7 @@ def show_cards(sub_df):
 
     top = sub_df.nlargest(50, "engagement").reset_index(drop=True)
 
+    # PC: 4열 / 모바일: 2열 — st.columns로 4열 고정 후 CSS로 모바일 대응
     cols_per_row = 4
     for i in range(0, len(top), cols_per_row):
         cols = st.columns(cols_per_row)
@@ -171,30 +173,30 @@ def show_cards(sub_df):
                         st.image(thumb, use_container_width=True)
                     except:
                         st.markdown(
-                            "<div style='background:#f0f0f0;height:160px;border-radius:8px;"
+                            "<div style='background:#f0f0f0;height:120px;border-radius:8px;"
                             "display:flex;align-items:center;justify-content:center;"
-                            "font-size:32px;'>🖼️</div>",
+                            "font-size:28px;'>🖼️</div>",
                             unsafe_allow_html=True
                         )
                 else:
                     st.markdown(
-                        "<div style='background:#f0f0f0;height:160px;border-radius:8px;"
+                        "<div style='background:#f0f0f0;height:120px;border-radius:8px;"
                         "display:flex;align-items:center;justify-content:center;"
-                        "font-size:32px;'>🖼️</div>",
+                        "font-size:28px;'>🖼️</div>",
                         unsafe_allow_html=True
                     )
 
-                # 유형 배지 + 광고/오가닉 배지
+                # 유형 + 광고 배지
                 type_colors = {"릴스": "#E1306C", "피드": "#405DE6", "피드(동영상)": "#833AB4"}
-                t_color = type_colors.get(row["type_label"], "#888")
-                ad_color = "#FF6B00" if row["ad_type"] == "📢 광고" else "#2E7D32"
+                t_color   = type_colors.get(row["type_label"], "#888")
+                ad_color  = "#FF6B00" if row["ad_type"] == "📢 광고" else "#2E7D32"
 
                 st.markdown(
-                    f'<div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap;">'
+                    f'<div style="margin-top:5px;display:flex;gap:3px;flex-wrap:wrap;">'
                     f'<span style="background:{t_color};color:white;font-size:10px;'
-                    f'padding:2px 7px;border-radius:10px;">{row["type_label"]}</span>'
+                    f'padding:1px 6px;border-radius:10px;">{row["type_label"]}</span>'
                     f'<span style="background:{ad_color};color:white;font-size:10px;'
-                    f'padding:2px 7px;border-radius:10px;">{row["ad_type"]}</span>'
+                    f'padding:1px 6px;border-radius:10px;">{row["ad_type"]}</span>'
                     f'</div>',
                     unsafe_allow_html=True
                 )
@@ -202,28 +204,24 @@ def show_cards(sub_df):
                 # 날짜 + 국가
                 date_str = row["timestamp"].strftime("%Y-%m-%d") if pd.notna(row["timestamp"]) else "-"
                 st.markdown(
-                    f'<div style="font-size:11px;color:#888;margin-top:4px;">'
-                    f'{date_str} &nbsp;|&nbsp; {row.get("country","")}</div>',
+                    f'<div style="font-size:11px;color:#888;margin-top:3px;">'
+                    f'{date_str}<br>{row.get("country","")}</div>',
                     unsafe_allow_html=True
                 )
 
                 # 작성자
                 username = str(row.get("ownerUsername", "-"))
                 st.markdown(
-                    f'<div style="font-size:13px;font-weight:500;margin-top:2px;">'
+                    f'<div style="font-size:12px;font-weight:500;margin-top:2px;">'
                     f'@{username}</div>',
                     unsafe_allow_html=True
                 )
 
                 # 주요지표 + 댓글
-                if row["content_type"] == "reel":
-                    metric = f"▶ {fmt(row['videoPlayCount'])}"
-                else:
-                    metric = f"❤ {fmt(row['likesCount'])}"
-
+                metric = f"▶ {fmt(row['videoPlayCount'])}" if row["content_type"] == "reel" else f"❤ {fmt(row['likesCount'])}"
                 st.markdown(
-                    f'<div style="font-size:13px;margin-top:4px;">'
-                    f'{metric} &nbsp;&nbsp; 💬 {fmt(row["commentsCount"])}</div>',
+                    f'<div style="font-size:12px;margin-top:3px;">'
+                    f'{metric} &nbsp; 💬 {fmt(row["commentsCount"])}</div>',
                     unsafe_allow_html=True
                 )
 
@@ -232,12 +230,12 @@ def show_cards(sub_df):
                 if url.startswith("http"):
                     st.markdown(
                         f'<a href="{url}" target="_blank" '
-                        f'style="font-size:12px;color:#E1306C;text-decoration:none;">'
-                        f'📎 인스타그램에서 보기</a>',
+                        f'style="font-size:11px;color:#E1306C;text-decoration:none;">'
+                        f'📎 보기</a>',
                         unsafe_allow_html=True
                     )
 
-                st.markdown("<div style='margin-bottom:16px;'></div>", unsafe_allow_html=True)
+                st.markdown("<div style='margin-bottom:12px;'></div>", unsafe_allow_html=True)
 
 
 def main():
@@ -255,23 +253,23 @@ def main():
             f"| 누적: **{len(df):,}건**"
         )
 
-    df = sidebar(df)
+    # 필터 (페이지 상단 expander)
+    df = render_filters(df)
 
     if df.empty:
         st.info("필터 조건에 맞는 데이터가 없습니다.")
         return
 
-    # KPI
-    ads     = (df["ad_type"] == "📢 광고").sum()
-    organic = (df["ad_type"] == "🌱 오가닉").sum()
+    st.divider()
 
+    # KPI
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("📋 전체",         fmt(len(df)))
     c2.metric("🎬 릴스",         fmt((df["content_type"] == "reel").sum()))
     c3.metric("🖼️ 피드",         fmt(df["content_type"].isin(["feed","video_feed"]).sum()))
     c4.metric("🇰🇷 한국",        fmt(df["is_korean"].sum()))
-    c5.metric("📢 광고",         fmt(ads))
-    c6.metric("🌱 오가닉",       fmt(organic))
+    c5.metric("📢 광고",         fmt((df["ad_type"] == "📢 광고").sum()))
+    c6.metric("🌱 오가닉",       fmt((df["ad_type"] == "🌱 오가닉").sum()))
 
     st.divider()
 

@@ -9,14 +9,40 @@ TYPE_COLOR = {
     "reel":       "#E1306C",
     "feed":       "#405DE6",
     "video_feed": "#833AB4",
-    "unknown":    "#AAAAAA",
 }
 TYPE_LABEL = {
     "reel":       "릴스",
     "feed":       "피드",
     "video_feed": "피드(동영상)",
-    "unknown":    "미분류",
 }
+
+# 광고 키워드 목록
+AD_KEYWORDS = [
+    "광고", "유료광고", "유료_광고", "ad", "sponsored", "collaboration",
+    "콜라보", "협찬", "제공", "paid", "promotion"
+]
+
+
+def detect_country(text: str) -> str:
+    t = str(text)
+    if re.search(r'[가-힣]', t):           return "🇰🇷 한국"
+    if re.search(r'[\u3040-\u30FF]', t):   return "🇯🇵 일본"
+    if re.search(r'[\u4E00-\u9FFF]', t):   return "🇨🇳 중국/대만"
+    if re.search(r'[\u0E00-\u0E7F]', t):   return "🇹🇭 태국"
+    if re.search(r'[\u0600-\u06FF]', t):   return "🇸🇦 아랍"
+    if re.search(r'[à-öø-ÿÀ-ÖØ-ß]', t):   return "🇪🇺 유럽"
+    if re.search(r'[a-zA-Z]', t):          return "🌐 영어권"
+    return "🌏 기타"
+
+
+def detect_ad(text: str) -> str:
+    """캡션에 광고 키워드가 있으면 '광고', 없으면 '오가닉'"""
+    t = str(text).lower()
+    for kw in AD_KEYWORDS:
+        # #광고 형태 또는 단독 단어로 포함된 경우
+        if f"#{kw.lower()}" in t or f" {kw.lower()} " in t or t.startswith(kw.lower()):
+            return "📢 광고"
+    return "🌱 오가닉"
 
 
 @st.cache_data(ttl=300)
@@ -29,17 +55,41 @@ def load_data():
     df["timestamp"]    = pd.to_datetime(df.get("timestamp", ""), errors="coerce", utc=True)
     df["last_updated"] = pd.to_datetime(df.get("last_updated", ""), errors="coerce")
     df["engagement"]   = df["likesCount"] + df["commentsCount"]
-    df["type_label"]   = df["content_type"].map(TYPE_LABEL).fillna("미분류")
 
-    # 한국 콘텐츠 감지
-    if "is_korean" not in df.columns:
-        df["is_korean"] = df.get("caption", "").apply(
-            lambda x: bool(re.search(r'[가-힣]', str(x)))
+    # content_type 재분류
+    def classify(row):
+        product_type = str(row.get("productType", "")).lower().strip()
+        media_type   = str(row.get("type", "")).lower().strip()
+        url          = str(row.get("url", ""))
+        video_url    = str(row.get("videoUrl", ""))
+
+        if product_type == "clips":                         return "reel"
+        if product_type == "carousel_item":                 return "carousel_item"
+        if product_type in ("feed", "carousel_container"):  return "feed"
+        if video_url and video_url not in ("nan", ""):      return "reel"
+        if media_type == "video":
+            return "reel" if "/reel/" in url else "video_feed"
+        if media_type in ("image", "sidecar"):              return "feed"
+        return "unknown"
+
+    df["content_type"] = df.apply(classify, axis=1)
+    df = df[~df["content_type"].isin(["carousel_item", "unknown"])].reset_index(drop=True)
+    df["type_label"] = df["content_type"].map(TYPE_LABEL).fillna("기타")
+
+    # 캡션 정리
+    if "caption" in df.columns:
+        df["caption"] = (
+            df["caption"].astype(str)
+            .str.replace(r'\\n', ' ', regex=True)
+            .str.replace(r'\n', ' ', regex=True)
+            .str.strip()
         )
-    df["is_korean"] = df["is_korean"].astype(str).str.lower() == "true"
 
-    # 슬라이드 자식 row 제거
-    df = df[df.get("content_type", "") != "carousel_item"].reset_index(drop=True)
+    # 국가 + 광고 여부 감지
+    df["country"]  = df.get("caption", "").apply(detect_country)
+    df["ad_type"]  = df.get("caption", "").apply(detect_ad)
+    df["is_korean"] = df["country"] == "🇰🇷 한국"
+
     return df
 
 
@@ -50,15 +100,19 @@ def fmt(n):
     return str(n)
 
 
-# ── 사이드바 필터 ──────────────────────────────────────────────────────────────
 def sidebar(df):
     with st.sidebar:
         st.header("🔍 필터")
 
-        # 한국 콘텐츠 토글
-        korean_only = st.toggle("🇰🇷 한국 콘텐츠만 보기", value=False)
-        if korean_only:
-            df = df[df["is_korean"]]
+        # 광고/오가닉 필터
+        ad_options = sorted(df["ad_type"].unique())
+        sel_ad = st.multiselect("콘텐츠 성격", ad_options, default=ad_options)
+        df = df[df["ad_type"].isin(sel_ad)]
+
+        # 국가 필터
+        countries = sorted(df["country"].unique())
+        sel_country = st.multiselect("국가", countries, default=countries)
+        df = df[df["country"].isin(sel_country)]
 
         # 콘텐츠 유형
         labels = sorted(df["type_label"].unique())
@@ -76,7 +130,7 @@ def sidebar(df):
                     (df["timestamp"].dt.date <= d[1])
                 ]
 
-        # 수집 키워드
+        # 키워드
         if "search_keyword" in df.columns:
             kws = sorted(df["search_keyword"].dropna().unique())
             sel_kw = st.multiselect("수집 키워드", kws, default=kws)
@@ -93,49 +147,99 @@ def sidebar(df):
     return df
 
 
-# ── 게시물 테이블 ──────────────────────────────────────────────────────────────
-def show_table(sub_df):
+def show_cards(sub_df):
     if sub_df.empty:
         st.info("해당 데이터가 없습니다.")
         return
 
-    display = sub_df.copy()
-    display["날짜"]   = display["timestamp"].dt.strftime("%Y-%m-%d").fillna("-")
-    display["유형"]   = display["type_label"]
-    display["🇰🇷"]    = display["is_korean"].apply(lambda x: "🇰🇷" if x else "")
-    display["작성자"] = display.get("ownerUsername", "-").fillna("-")
-    display["캡션"]   = display.get("caption", "").fillna("").str[:60] + "..."
+    top = sub_df.nlargest(50, "engagement").reset_index(drop=True)
 
-    # 릴스는 조회수, 피드는 좋아요를 메인 지표로 표시
-    def main_metric(row):
-        if row["content_type"] == "reel":
-            v = row["videoPlayCount"]
-            return f"▶ {fmt(v)}"
-        else:
-            v = row["likesCount"]
-            return f"❤ {fmt(v)}"
+    cols_per_row = 4
+    for i in range(0, len(top), cols_per_row):
+        cols = st.columns(cols_per_row)
+        for j, col in enumerate(cols):
+            idx = i + j
+            if idx >= len(top):
+                break
+            row = top.iloc[idx]
 
-    display["주요지표"] = display.apply(main_metric, axis=1)
-    display["댓글"]    = display["commentsCount"].apply(fmt)
+            with col:
+                # 썸네일
+                thumb = str(row.get("displayUrl", ""))
+                if thumb and thumb not in ("nan", ""):
+                    try:
+                        st.image(thumb, use_container_width=True)
+                    except:
+                        st.markdown(
+                            "<div style='background:#f0f0f0;height:160px;border-radius:8px;"
+                            "display:flex;align-items:center;justify-content:center;"
+                            "font-size:32px;'>🖼️</div>",
+                            unsafe_allow_html=True
+                        )
+                else:
+                    st.markdown(
+                        "<div style='background:#f0f0f0;height:160px;border-radius:8px;"
+                        "display:flex;align-items:center;justify-content:center;"
+                        "font-size:32px;'>🖼️</div>",
+                        unsafe_allow_html=True
+                    )
 
-    # 인스타 링크 버튼
-    display["링크"] = display.get("url", "").apply(
-        lambda u: f'<a href="{u}" target="_blank" style="color:#E1306C;">📎 열기</a>'
-        if pd.notna(u) and str(u).startswith("http") else "-"
-    )
+                # 유형 배지 + 광고/오가닉 배지
+                type_colors = {"릴스": "#E1306C", "피드": "#405DE6", "피드(동영상)": "#833AB4"}
+                t_color = type_colors.get(row["type_label"], "#888")
+                ad_color = "#FF6B00" if row["ad_type"] == "📢 광고" else "#2E7D32"
 
-    show_cols = ["날짜", "유형", "🇰🇷", "작성자", "캡션", "주요지표", "댓글", "링크"]
-    show_cols = [c for c in show_cols if c in display.columns]
+                st.markdown(
+                    f'<div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap;">'
+                    f'<span style="background:{t_color};color:white;font-size:10px;'
+                    f'padding:2px 7px;border-radius:10px;">{row["type_label"]}</span>'
+                    f'<span style="background:{ad_color};color:white;font-size:10px;'
+                    f'padding:2px 7px;border-radius:10px;">{row["ad_type"]}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
 
-    st.write(
-        display.nlargest(50, "engagement")[show_cols]
-        .reset_index(drop=True)
-        .to_html(escape=False, index=False),
-        unsafe_allow_html=True,
-    )
+                # 날짜 + 국가
+                date_str = row["timestamp"].strftime("%Y-%m-%d") if pd.notna(row["timestamp"]) else "-"
+                st.markdown(
+                    f'<div style="font-size:11px;color:#888;margin-top:4px;">'
+                    f'{date_str} &nbsp;|&nbsp; {row.get("country","")}</div>',
+                    unsafe_allow_html=True
+                )
+
+                # 작성자
+                username = str(row.get("ownerUsername", "-"))
+                st.markdown(
+                    f'<div style="font-size:13px;font-weight:500;margin-top:2px;">'
+                    f'@{username}</div>',
+                    unsafe_allow_html=True
+                )
+
+                # 주요지표 + 댓글
+                if row["content_type"] == "reel":
+                    metric = f"▶ {fmt(row['videoPlayCount'])}"
+                else:
+                    metric = f"❤ {fmt(row['likesCount'])}"
+
+                st.markdown(
+                    f'<div style="font-size:13px;margin-top:4px;">'
+                    f'{metric} &nbsp;&nbsp; 💬 {fmt(row["commentsCount"])}</div>',
+                    unsafe_allow_html=True
+                )
+
+                # 링크
+                url = str(row.get("url", ""))
+                if url.startswith("http"):
+                    st.markdown(
+                        f'<a href="{url}" target="_blank" '
+                        f'style="font-size:12px;color:#E1306C;text-decoration:none;">'
+                        f'📎 인스타그램에서 보기</a>',
+                        unsafe_allow_html=True
+                    )
+
+                st.markdown("<div style='margin-bottom:16px;'></div>", unsafe_allow_html=True)
 
 
-# ── 메인 ──────────────────────────────────────────────────────────────────────
 def main():
     st.markdown("## 📱 Meitu 인스타그램 모니터링")
 
@@ -157,67 +261,69 @@ def main():
         st.info("필터 조건에 맞는 데이터가 없습니다.")
         return
 
-    # ── KPI 카드 ────────────────────────────────────────────────────────────
-    total  = len(df)
-    reels  = (df["content_type"] == "reel").sum()
-    feeds  = df["content_type"].isin(["feed", "video_feed"]).sum()
-    korean = df["is_korean"].sum()
-    avg_likes = df["likesCount"].mean()
+    # KPI
+    ads     = (df["ad_type"] == "📢 광고").sum()
+    organic = (df["ad_type"] == "🌱 오가닉").sum()
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("📋 전체",          fmt(total))
-    c2.metric("🎬 릴스",          fmt(reels))
-    c3.metric("🖼️ 피드",          fmt(feeds))
-    c4.metric("🇰🇷 한국 콘텐츠",  fmt(korean))
-    c5.metric("❤️ 평균 좋아요",   f"{avg_likes:.1f}")
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("📋 전체",         fmt(len(df)))
+    c2.metric("🎬 릴스",         fmt((df["content_type"] == "reel").sum()))
+    c3.metric("🖼️ 피드",         fmt(df["content_type"].isin(["feed","video_feed"]).sum()))
+    c4.metric("🇰🇷 한국",        fmt(df["is_korean"].sum()))
+    c5.metric("📢 광고",         fmt(ads))
+    c6.metric("🌱 오가닉",       fmt(organic))
 
     st.divider()
 
-    # ── 차트 ────────────────────────────────────────────────────────────────
+    # 차트
     cmap = {v: TYPE_COLOR.get(k, "#888") for k, v in TYPE_LABEL.items()}
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.subheader("콘텐츠 유형 비율")
+        st.subheader("콘텐츠 유형")
         counts = df["type_label"].value_counts().reset_index()
         counts.columns = ["유형", "건수"]
-        fig = px.pie(
-            counts, names="유형", values="건수", hole=0.4,
-            color="유형", color_discrete_map=cmap,
-        )
+        fig = px.pie(counts, names="유형", values="건수", hole=0.4,
+                     color="유형", color_discrete_map=cmap)
         fig.update_traces(textposition="outside", textinfo="percent+label")
         fig.update_layout(showlegend=False, margin=dict(t=20, b=0, l=0, r=0))
         st.plotly_chart(fig, use_container_width=True)
 
     with col2:
-        st.subheader("키워드별 수집량")
-        if "search_keyword" in df.columns:
-            kw = (
-                df.groupby(["search_keyword", "type_label"])
-                .size().reset_index(name="count")
-            )
-            fig2 = px.bar(
-                kw, x="search_keyword", y="count",
-                color="type_label", color_discrete_map=cmap,
-                barmode="stack",
-                labels={"search_keyword": "키워드", "count": "건수", "type_label": "유형"},
-            )
-            fig2.update_layout(showlegend=True, margin=dict(t=20, b=0))
-            st.plotly_chart(fig2, use_container_width=True)
+        st.subheader("광고 vs 오가닉")
+        ad_counts = df["ad_type"].value_counts().reset_index()
+        ad_counts.columns = ["유형", "건수"]
+        fig2 = px.pie(ad_counts, names="유형", values="건수", hole=0.4,
+                      color="유형",
+                      color_discrete_map={"📢 광고": "#FF6B00", "🌱 오가닉": "#2E7D32"})
+        fig2.update_traces(textposition="outside", textinfo="percent+label")
+        fig2.update_layout(showlegend=False, margin=dict(t=20, b=0, l=0, r=0))
+        st.plotly_chart(fig2, use_container_width=True)
+
+    with col3:
+        st.subheader("국가별 분포")
+        country_counts = df["country"].value_counts().reset_index()
+        country_counts.columns = ["국가", "건수"]
+        fig3 = px.bar(country_counts, x="국가", y="건수",
+                      labels={"국가": "", "건수": "건수"})
+        fig3.update_layout(showlegend=False, margin=dict(t=20, b=0))
+        st.plotly_chart(fig3, use_container_width=True)
 
     st.divider()
 
-    # ── 게시물 목록 탭 ───────────────────────────────────────────────────────
+    # 게시물 카드
     st.subheader("📋 게시물 목록")
-    st.caption("릴스는 조회수(▶), 피드는 좋아요(❤) 기준 상위 50건 표시 | 링크 클릭 시 인스타그램으로 이동")
+    st.caption("인게이지먼트 기준 상위 50건 | 링크 클릭 시 인스타그램으로 이동")
 
-    tab_all, tab_reel, tab_feed, tab_kr = st.tabs(
-        ["전체", "🎬 릴스", "🖼️ 피드", "🇰🇷 한국 콘텐츠"]
-    )
-    with tab_all:  show_table(df)
-    with tab_reel: show_table(df[df["content_type"] == "reel"])
-    with tab_feed: show_table(df[df["content_type"].isin(["feed", "video_feed"])])
-    with tab_kr:   show_table(df[df["is_korean"]])
+    tab_all, tab_reel, tab_feed, tab_kr, tab_ad, tab_organic = st.tabs([
+        "전체", "🎬 릴스", "🖼️ 피드", "🇰🇷 한국", "📢 광고", "🌱 오가닉"
+    ])
+    with tab_all:     show_cards(df)
+    with tab_reel:    show_cards(df[df["content_type"] == "reel"])
+    with tab_feed:    show_cards(df[df["content_type"].isin(["feed", "video_feed"])])
+    with tab_kr:      show_cards(df[df["is_korean"]])
+    with tab_ad:      show_cards(df[df["ad_type"] == "📢 광고"])
+    with tab_organic: show_cards(df[df["ad_type"] == "🌱 오가닉"])
 
 
 if __name__ == "__main__":

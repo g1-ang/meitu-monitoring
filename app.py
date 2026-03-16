@@ -144,7 +144,6 @@ def render_filters(df):
 
 
 def render_kpi_bar(df):
-    """KPI를 한 줄 가로 요약바로 표시 — 모바일에서도 한 줄"""
     total   = len(df)
     reels   = (df["content_type"] == "reel").sum()
     feeds   = df["content_type"].isin(["feed","video_feed"]).sum()
@@ -154,40 +153,37 @@ def render_kpi_bar(df):
 
     st.markdown(
         f"""
-        <div style="
-            display:flex; flex-wrap:nowrap; overflow-x:auto;
-            gap:0; background:var(--color-background-secondary);
-            border-radius:10px; padding:10px 4px;
-            margin-bottom:8px; white-space:nowrap;
-        ">
-            <div style="flex:1;min-width:60px;text-align:center;padding:0 6px;
-                        border-right:1px solid var(--color-border-tertiary);">
+        <div style="display:flex;flex-wrap:nowrap;overflow-x:auto;gap:0;
+            background:var(--color-background-secondary);border-radius:10px;
+            padding:10px 4px;margin-bottom:8px;white-space:nowrap;">
+            <div style="flex:1;min-width:55px;text-align:center;padding:0 4px;
+                border-right:1px solid var(--color-border-tertiary);">
                 <div style="font-size:10px;color:var(--color-text-secondary);">📋 전체</div>
-                <div style="font-size:18px;font-weight:500;color:var(--color-text-primary);">{fmt(total)}</div>
+                <div style="font-size:17px;font-weight:500;color:var(--color-text-primary);">{fmt(total)}</div>
             </div>
-            <div style="flex:1;min-width:60px;text-align:center;padding:0 6px;
-                        border-right:1px solid var(--color-border-tertiary);">
+            <div style="flex:1;min-width:55px;text-align:center;padding:0 4px;
+                border-right:1px solid var(--color-border-tertiary);">
                 <div style="font-size:10px;color:var(--color-text-secondary);">🎬 릴스</div>
-                <div style="font-size:18px;font-weight:500;color:#E1306C;">{fmt(reels)}</div>
+                <div style="font-size:17px;font-weight:500;color:#E1306C;">{fmt(reels)}</div>
             </div>
-            <div style="flex:1;min-width:60px;text-align:center;padding:0 6px;
-                        border-right:1px solid var(--color-border-tertiary);">
+            <div style="flex:1;min-width:55px;text-align:center;padding:0 4px;
+                border-right:1px solid var(--color-border-tertiary);">
                 <div style="font-size:10px;color:var(--color-text-secondary);">🖼️ 피드</div>
-                <div style="font-size:18px;font-weight:500;color:#405DE6;">{fmt(feeds)}</div>
+                <div style="font-size:17px;font-weight:500;color:#405DE6;">{fmt(feeds)}</div>
             </div>
-            <div style="flex:1;min-width:60px;text-align:center;padding:0 6px;
-                        border-right:1px solid var(--color-border-tertiary);">
+            <div style="flex:1;min-width:55px;text-align:center;padding:0 4px;
+                border-right:1px solid var(--color-border-tertiary);">
                 <div style="font-size:10px;color:var(--color-text-secondary);">🇰🇷 한국</div>
-                <div style="font-size:18px;font-weight:500;color:var(--color-text-primary);">{fmt(korean)}</div>
+                <div style="font-size:17px;font-weight:500;color:var(--color-text-primary);">{fmt(korean)}</div>
             </div>
-            <div style="flex:1;min-width:60px;text-align:center;padding:0 6px;
-                        border-right:1px solid var(--color-border-tertiary);">
+            <div style="flex:1;min-width:55px;text-align:center;padding:0 4px;
+                border-right:1px solid var(--color-border-tertiary);">
                 <div style="font-size:10px;color:var(--color-text-secondary);">📢 광고</div>
-                <div style="font-size:18px;font-weight:500;color:#FF6B00;">{fmt(ads)}</div>
+                <div style="font-size:17px;font-weight:500;color:#FF6B00;">{fmt(ads)}</div>
             </div>
-            <div style="flex:1;min-width:60px;text-align:center;padding:0 6px;">
+            <div style="flex:1;min-width:55px;text-align:center;padding:0 4px;">
                 <div style="font-size:10px;color:var(--color-text-secondary);">🌱 오가닉</div>
-                <div style="font-size:18px;font-weight:500;color:#2E7D32;">{fmt(organic)}</div>
+                <div style="font-size:17px;font-weight:500;color:#2E7D32;">{fmt(organic)}</div>
             </div>
         </div>
         """,
@@ -196,7 +192,6 @@ def render_kpi_bar(df):
 
 
 def render_charts_small(df):
-    """차트 3개를 작게 나란히 — 방법 A"""
     cmap = {v: TYPE_COLOR.get(k, "#888") for k, v in TYPE_LABEL.items()}
     col1, col2, col3 = st.columns(3)
 
@@ -211,8 +206,7 @@ def render_charts_small(df):
             showlegend=True,
             legend=dict(orientation="h", yanchor="bottom", y=-0.35,
                         xanchor="center", x=0.5, font=dict(size=9)),
-            margin=dict(t=5, b=40, l=5, r=5),
-            height=180,
+            margin=dict(t=5, b=40, l=5, r=5), height=180,
         )
         st.plotly_chart(fig, use_container_width=True)
 
@@ -228,8 +222,7 @@ def render_charts_small(df):
             showlegend=True,
             legend=dict(orientation="h", yanchor="bottom", y=-0.35,
                         xanchor="center", x=0.5, font=dict(size=9)),
-            margin=dict(t=5, b=40, l=5, r=5),
-            height=180,
+            margin=dict(t=5, b=40, l=5, r=5), height=180,
         )
         st.plotly_chart(fig2, use_container_width=True)
 
@@ -241,8 +234,7 @@ def render_charts_small(df):
                       labels={"국가": "", "건수": ""})
         fig3.update_layout(
             showlegend=False,
-            margin=dict(t=5, b=5, l=5, r=5),
-            height=180,
+            margin=dict(t=5, b=5, l=5, r=5), height=180,
             xaxis=dict(tickfont=dict(size=9)),
             yaxis=dict(tickfont=dict(size=9)),
         )
@@ -256,65 +248,84 @@ def show_cards(sub_df):
 
     top = sub_df.nlargest(50, "engagement").reset_index(drop=True)
 
-    cols_per_row = 4
-    for i in range(0, len(top), cols_per_row):
-        cols = st.columns(cols_per_row)
-        for j, col in enumerate(cols):
-            idx = i + j
-            if idx >= len(top):
-                break
-            row = top.iloc[idx]
+    type_colors = {"릴스": "#E1306C", "피드": "#405DE6", "피드(동영상)": "#833AB4"}
 
-            with col:
-                thumb = str(row.get("displayUrl", ""))
-                if thumb and thumb not in ("nan", ""):
-                    try:
-                        st.image(thumb, use_container_width=True)
-                    except:
-                        st.markdown(
-                            "<div style='background:#f0f0f0;height:120px;border-radius:8px;"
-                            "display:flex;align-items:center;justify-content:center;"
-                            "font-size:28px;'>🖼️</div>", unsafe_allow_html=True)
-                else:
-                    st.markdown(
-                        "<div style='background:#f0f0f0;height:120px;border-radius:8px;"
-                        "display:flex;align-items:center;justify-content:center;"
-                        "font-size:28px;'>🖼️</div>", unsafe_allow_html=True)
+    # HTML 그리드로 직접 구성 — 모바일 2열 / PC 4열
+    cards_html = """
+    <style>
+    .ig-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin-top: 8px;
+    }
+    @media (max-width: 768px) {
+        .ig-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    }
+    .ig-card {
+        background: var(--background-color, #fff);
+        border: 0.5px solid rgba(128,128,128,0.2);
+        border-radius: 10px;
+        overflow: hidden;
+    }
+    .ig-card img {
+        width: 100%; aspect-ratio: 1; object-fit: cover; display: block;
+    }
+    .ig-card-placeholder {
+        width: 100%; aspect-ratio: 1;
+        background: #f0f0f0;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 28px;
+    }
+    .ig-card-body { padding: 7px 8px 10px; }
+    .ig-badges { display: flex; gap: 3px; flex-wrap: wrap; margin-bottom: 4px; }
+    .ig-badge {
+        font-size: 9px; font-weight: 500;
+        padding: 1px 6px; border-radius: 10px; color: white;
+    }
+    .ig-meta { font-size: 10px; color: #888; margin-bottom: 2px; }
+    .ig-user { font-size: 11px; font-weight: 500; margin-bottom: 3px; }
+    .ig-stats { font-size: 11px; margin-bottom: 4px; }
+    .ig-link { font-size: 10px; color: #E1306C; text-decoration: none; }
+    </style>
+    <div class="ig-grid">
+    """
 
-                type_colors = {"릴스": "#E1306C", "피드": "#405DE6", "피드(동영상)": "#833AB4"}
-                t_color  = type_colors.get(row["type_label"], "#888")
-                ad_color = "#FF6B00" if row["ad_type"] == "📢 광고" else "#2E7D32"
+    for _, row in top.iterrows():
+        thumb      = str(row.get("displayUrl", ""))
+        t_color    = type_colors.get(row["type_label"], "#888")
+        ad_color   = "#FF6B00" if row["ad_type"] == "📢 광고" else "#2E7D32"
+        date_str   = row["timestamp"].strftime("%Y-%m-%d") if pd.notna(row["timestamp"]) else "-"
+        country    = row.get("country", "")
+        username   = str(row.get("ownerUsername", "-"))
+        metric     = f"▶ {fmt(row['videoPlayCount'])}" if row["content_type"] == "reel" else f"❤ {fmt(row['likesCount'])}"
+        comments   = fmt(row["commentsCount"])
+        url        = str(row.get("url", ""))
+        link_html  = f'<a class="ig-link" href="{url}" target="_blank">📎 보기</a>' if url.startswith("http") else ""
 
-                st.markdown(
-                    f'<div style="margin-top:5px;display:flex;gap:3px;flex-wrap:wrap;">'
-                    f'<span style="background:{t_color};color:white;font-size:10px;'
-                    f'padding:1px 6px;border-radius:10px;">{row["type_label"]}</span>'
-                    f'<span style="background:{ad_color};color:white;font-size:10px;'
-                    f'padding:1px 6px;border-radius:10px;">{row["ad_type"]}</span>'
-                    f'</div>', unsafe_allow_html=True)
+        if thumb and thumb not in ("nan", ""):
+            thumb_html = f'<img src="{thumb}" loading="lazy" onerror="this.parentNode.innerHTML=\'<div class=ig-card-placeholder>🖼️</div>\'">'
+        else:
+            thumb_html = '<div class="ig-card-placeholder">🖼️</div>'
 
-                date_str = row["timestamp"].strftime("%Y-%m-%d") if pd.notna(row["timestamp"]) else "-"
-                st.markdown(
-                    f'<div style="font-size:11px;color:#888;margin-top:3px;">'
-                    f'{date_str} | {row.get("country","")}</div>', unsafe_allow_html=True)
+        cards_html += f"""
+        <div class="ig-card">
+            {thumb_html}
+            <div class="ig-card-body">
+                <div class="ig-badges">
+                    <span class="ig-badge" style="background:{t_color};">{row["type_label"]}</span>
+                    <span class="ig-badge" style="background:{ad_color};">{row["ad_type"]}</span>
+                </div>
+                <div class="ig-meta">{date_str} | {country}</div>
+                <div class="ig-user">@{username}</div>
+                <div class="ig-stats">{metric} &nbsp; 💬 {comments}</div>
+                {link_html}
+            </div>
+        </div>
+        """
 
-                st.markdown(
-                    f'<div style="font-size:12px;font-weight:500;margin-top:2px;">'
-                    f'@{str(row.get("ownerUsername","-"))}</div>', unsafe_allow_html=True)
-
-                metric = f"▶ {fmt(row['videoPlayCount'])}" if row["content_type"] == "reel" else f"❤ {fmt(row['likesCount'])}"
-                st.markdown(
-                    f'<div style="font-size:12px;margin-top:3px;">'
-                    f'{metric} &nbsp; 💬 {fmt(row["commentsCount"])}</div>', unsafe_allow_html=True)
-
-                url = str(row.get("url", ""))
-                if url.startswith("http"):
-                    st.markdown(
-                        f'<a href="{url}" target="_blank" '
-                        f'style="font-size:11px;color:#E1306C;text-decoration:none;">'
-                        f'📎 보기</a>', unsafe_allow_html=True)
-
-                st.markdown("<div style='margin-bottom:12px;'></div>", unsafe_allow_html=True)
+    cards_html += "</div>"
+    st.html(cards_html)
 
 
 def main():
@@ -338,17 +349,11 @@ def main():
         st.info("필터 조건에 맞는 데이터가 없습니다.")
         return
 
-    # KPI 한 줄 요약바
     render_kpi_bar(df)
-
     st.divider()
-
-    # 차트 3개 나란히 (방법 A)
     render_charts_small(df)
-
     st.divider()
 
-    # 게시물 카드
     st.subheader("📋 게시물 목록")
     st.caption("인게이지먼트 기준 상위 50건 | 링크 클릭 시 인스타그램으로 이동")
 

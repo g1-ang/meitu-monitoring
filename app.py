@@ -1,96 +1,224 @@
-import streamlit as st
-import pandas as pd
-import os
 import re
+import pandas as pd
+import streamlit as st
+import plotly.express as px
 
-# 1. 페이지 설정
-st.set_page_config(page_title="메이투 마케팅 모니터링", layout="wide")
-st.title("🚀 메이투 즉각 모니터링 자동화 시스템")
+st.set_page_config(page_title="Meitu 모니터링", page_icon="📊", layout="wide")
 
-# 2. 파일 불러오기
-data_path = './data/latest_monitoring.csv'
+TYPE_COLOR = {
+    "reel":       "#E1306C",
+    "feed":       "#405DE6",
+    "video_feed": "#833AB4",
+    "unknown":    "#AAAAAA",
+}
+TYPE_LABEL = {
+    "reel":       "릴스",
+    "feed":       "피드",
+    "video_feed": "피드(동영상)",
+    "unknown":    "미분류",
+}
 
-if os.path.exists(data_path):
-    try:
-        df = pd.read_csv(data_path)
-        
-        # --- [복구 1] 날짜 데이터 처리 ---
-        # timestamp나 last_updated 중 있는 것을 사용합니다.
-        time_col = 'timestamp' if 'timestamp' in df.columns else ('last_updated' if 'last_updated' in df.columns else None)
-        if time_col:
-            df['date_only'] = pd.to_datetime(df[time_col], errors='coerce').dt.date
-        else:
-            df['date_only'] = pd.Timestamp.now().date()
 
-        # --- 숫자 데이터 안전 변환 ---
-        def clean_num(df, col_names):
-            found_col = next((c for c in col_names if c in df.columns), None)
-            return pd.to_numeric(df[found_col], errors='coerce').fillna(0).astype(int) if found_col else pd.Series([0]*len(df))
+@st.cache_data(ttl=300)
+def load_data():
+    df = pd.read_csv("data/latest_monitoring.csv", dtype=str)
 
-        df['view_count'] = clean_num(df, ['videoPlayCount', 'playCount'])
-        df['like_count'] = clean_num(df, ['likesCount', 'likes'])
-        df['caption'] = df['caption'].fillna('').astype(str)
+    for col in ("likesCount", "commentsCount", "videoPlayCount"):
+        df[col] = pd.to_numeric(df.get(col, 0), errors="coerce").fillna(0).astype(int)
 
-        # --- [복구 2] 릴스 판별 로직 강화 ---
-        # 조회수가 0보다 크거나, 유형이 Video인 경우 릴스로 판단
-        df['is_reels'] = (df['view_count'] > 0) | (df.get('type') == 'Video')
+    df["timestamp"]    = pd.to_datetime(df.get("timestamp", ""), errors="coerce", utc=True)
+    df["last_updated"] = pd.to_datetime(df.get("last_updated", ""), errors="coerce")
+    df["engagement"]   = df["likesCount"] + df["commentsCount"]
+    df["type_label"]   = df["content_type"].map(TYPE_LABEL).fillna("미분류")
 
-        # --- [복구 3] 필터링 기능 (사이드바) ---
-        st.sidebar.header("🔍 필터링 설정")
-        korean_only = st.sidebar.checkbox("한국 콘텐츠만 보기 (한글 포함)", value=True)
-        
-        # 날짜 필터
-        min_date = df['date_only'].min() if not df.empty else pd.Timestamp.now().date()
-        max_date = df['date_only'].max() if not df.empty else pd.Timestamp.now().date()
-        date_range = st.sidebar.date_input("조회 기간", value=(min_date, max_date))
+    # 한국 콘텐츠 감지
+    if "is_korean" not in df.columns:
+        df["is_korean"] = df.get("caption", "").apply(
+            lambda x: bool(re.search(r'[가-힣]', str(x)))
+        )
+    df["is_korean"] = df["is_korean"].astype(str).str.lower() == "true"
 
-        # 필터 적용
-        display_df = df.copy()
+    # 슬라이드 자식 row 제거
+    df = df[df.get("content_type", "") != "carousel_item"].reset_index(drop=True)
+    return df
+
+
+def fmt(n):
+    n = int(n)
+    if n >= 10000: return f"{n/10000:.1f}만"
+    if n >= 1000:  return f"{n/1000:.1f}천"
+    return str(n)
+
+
+# ── 사이드바 필터 ──────────────────────────────────────────────────────────────
+def sidebar(df):
+    with st.sidebar:
+        st.header("🔍 필터")
+
+        # 한국 콘텐츠 토글
+        korean_only = st.toggle("🇰🇷 한국 콘텐츠만 보기", value=False)
         if korean_only:
-            display_df = display_df[display_df['caption'].str.contains('[가-힣]', regex=True)]
-        if isinstance(date_range, tuple) and len(date_range) == 2:
-            display_df = display_df[(display_df['date_only'] >= date_range[0]) & (display_df['date_only'] <= date_range[1])]
+            df = df[df["is_korean"]]
 
-        # 성과 요약
-        m1, m2, m3 = st.columns(3)
-        m1.metric("수집 콘텐츠", f"{len(display_df)}개")
-        m2.metric("총 조회수", f"{int(display_df['view_count'].sum()):,}회")
-        m3.metric("총 좋아요", f"{int(display_df['like_count'].sum()):,}개")
+        # 콘텐츠 유형
+        labels = sorted(df["type_label"].unique())
+        sel_type = st.multiselect("콘텐츠 유형", labels, default=labels)
+        df = df[df["type_label"].isin(sel_type)]
+
+        # 날짜 범위
+        if df["timestamp"].notna().any():
+            min_d = df["timestamp"].min().date()
+            max_d = df["timestamp"].max().date()
+            d = st.date_input("게시 기간", (min_d, max_d), min_value=min_d, max_value=max_d)
+            if isinstance(d, (list, tuple)) and len(d) == 2:
+                df = df[
+                    (df["timestamp"].dt.date >= d[0]) &
+                    (df["timestamp"].dt.date <= d[1])
+                ]
+
+        # 수집 키워드
+        if "search_keyword" in df.columns:
+            kws = sorted(df["search_keyword"].dropna().unique())
+            sel_kw = st.multiselect("수집 키워드", kws, default=kws)
+            df = df[df["search_keyword"].isin(sel_kw)]
 
         st.divider()
+        st.caption(f"필터 결과: **{len(df):,}건**")
+        st.download_button(
+            "📥 CSV 다운로드",
+            df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
+            "meitu_monitoring.csv", "text/csv",
+            use_container_width=True,
+        )
+    return df
 
-        # --- 브랜드 탭 구성 ---
-        tab1, tab2 = st.tabs(["✨ 메이투 (Meitu)", "📸 뷰티캠 (BeautyCam)"])
 
-        def show_grid(brand_kw):
-            target = display_df[display_df['caption'].str.contains('|'.join(brand_kw), case=False, na=False)]
-            
-            # 릴스(동영상)와 피드를 구분하여 정렬
-            reels = target[target['is_reels'] == True].sort_values('view_count', ascending=False).head(12)
-            feeds = target[target['is_reels'] == False].sort_values('like_count', ascending=False).head(12)
+# ── 게시물 테이블 ──────────────────────────────────────────────────────────────
+def show_table(sub_df):
+    if sub_df.empty:
+        st.info("해당 데이터가 없습니다.")
+        return
 
-            col1, col2 = st.columns(2)
-            with col1:
-                st.subheader("🎬 인기 릴스 (동영상)")
-                for _, r in reels.iterrows():
-                    with st.container(border=True):
-                        if pd.notna(r.get('displayUrl')): st.image(r['displayUrl'], use_container_width=True)
-                        st.caption(f"📅 날짜: {r['date_only']}")
-                        st.write(f"**@{r.get('ownerUsername', 'user')}** | 🔥 {int(r['view_count']):,}")
-                        st.link_button("영상 보기", r.get('url', '#'))
-            with col2:
-                st.subheader("📸 인기 피드 (게시글)")
-                for _, r in feeds.iterrows():
-                    with st.container(border=True):
-                        if pd.notna(r.get('displayUrl')): st.image(r['displayUrl'], use_container_width=True)
-                        st.caption(f"📅 날짜: {r['date_only']}")
-                        st.write(f"**@{r.get('ownerUsername', 'user')}** | ❤️ {int(r['like_count']):,}")
-                        st.link_button("게시물 보기", r.get('url', '#'))
+    display = sub_df.copy()
+    display["날짜"]   = display["timestamp"].dt.strftime("%Y-%m-%d").fillna("-")
+    display["유형"]   = display["type_label"]
+    display["🇰🇷"]    = display["is_korean"].apply(lambda x: "🇰🇷" if x else "")
+    display["작성자"] = display.get("ownerUsername", "-").fillna("-")
+    display["캡션"]   = display.get("caption", "").fillna("").str[:60] + "..."
 
-        with tab1: show_grid(['메이투', 'meitu'])
-        with tab2: show_grid(['뷰티캠', 'beautycam'])
+    # 릴스는 조회수, 피드는 좋아요를 메인 지표로 표시
+    def main_metric(row):
+        if row["content_type"] == "reel":
+            v = row["videoPlayCount"]
+            return f"▶ {fmt(v)}"
+        else:
+            v = row["likesCount"]
+            return f"❤ {fmt(v)}"
 
-    except Exception as e:
-        st.error(f"⚠️ 기능 복구 중 오류 발생: {e}")
-else:
-    st.error("📂 파일을 찾을 수 없습니다.")
+    display["주요지표"] = display.apply(main_metric, axis=1)
+    display["댓글"]    = display["commentsCount"].apply(fmt)
+
+    # 인스타 링크 버튼
+    display["링크"] = display.get("url", "").apply(
+        lambda u: f'<a href="{u}" target="_blank" style="color:#E1306C;">📎 열기</a>'
+        if pd.notna(u) and str(u).startswith("http") else "-"
+    )
+
+    show_cols = ["날짜", "유형", "🇰🇷", "작성자", "캡션", "주요지표", "댓글", "링크"]
+    show_cols = [c for c in show_cols if c in display.columns]
+
+    st.write(
+        display.nlargest(50, "engagement")[show_cols]
+        .reset_index(drop=True)
+        .to_html(escape=False, index=False),
+        unsafe_allow_html=True,
+    )
+
+
+# ── 메인 ──────────────────────────────────────────────────────────────────────
+def main():
+    st.markdown("## 📱 Meitu 인스타그램 모니터링")
+
+    try:
+        df = load_data()
+    except FileNotFoundError:
+        st.warning("데이터 파일이 없습니다. GitHub Actions를 먼저 실행해주세요.", icon="⚠️")
+        return
+
+    if df["last_updated"].notna().any():
+        st.caption(
+            f"마지막 수집: **{df['last_updated'].max().strftime('%Y-%m-%d %H:%M')}** "
+            f"| 누적: **{len(df):,}건**"
+        )
+
+    df = sidebar(df)
+
+    if df.empty:
+        st.info("필터 조건에 맞는 데이터가 없습니다.")
+        return
+
+    # ── KPI 카드 ────────────────────────────────────────────────────────────
+    total  = len(df)
+    reels  = (df["content_type"] == "reel").sum()
+    feeds  = df["content_type"].isin(["feed", "video_feed"]).sum()
+    korean = df["is_korean"].sum()
+    avg_likes = df["likesCount"].mean()
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("📋 전체",          fmt(total))
+    c2.metric("🎬 릴스",          fmt(reels))
+    c3.metric("🖼️ 피드",          fmt(feeds))
+    c4.metric("🇰🇷 한국 콘텐츠",  fmt(korean))
+    c5.metric("❤️ 평균 좋아요",   f"{avg_likes:.1f}")
+
+    st.divider()
+
+    # ── 차트 ────────────────────────────────────────────────────────────────
+    cmap = {v: TYPE_COLOR.get(k, "#888") for k, v in TYPE_LABEL.items()}
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("콘텐츠 유형 비율")
+        counts = df["type_label"].value_counts().reset_index()
+        counts.columns = ["유형", "건수"]
+        fig = px.pie(
+            counts, names="유형", values="건수", hole=0.4,
+            color="유형", color_discrete_map=cmap,
+        )
+        fig.update_traces(textposition="outside", textinfo="percent+label")
+        fig.update_layout(showlegend=False, margin=dict(t=20, b=0, l=0, r=0))
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        st.subheader("키워드별 수집량")
+        if "search_keyword" in df.columns:
+            kw = (
+                df.groupby(["search_keyword", "type_label"])
+                .size().reset_index(name="count")
+            )
+            fig2 = px.bar(
+                kw, x="search_keyword", y="count",
+                color="type_label", color_discrete_map=cmap,
+                barmode="stack",
+                labels={"search_keyword": "키워드", "count": "건수", "type_label": "유형"},
+            )
+            fig2.update_layout(showlegend=True, margin=dict(t=20, b=0))
+            st.plotly_chart(fig2, use_container_width=True)
+
+    st.divider()
+
+    # ── 게시물 목록 탭 ───────────────────────────────────────────────────────
+    st.subheader("📋 게시물 목록")
+    st.caption("릴스는 조회수(▶), 피드는 좋아요(❤) 기준 상위 50건 표시 | 링크 클릭 시 인스타그램으로 이동")
+
+    tab_all, tab_reel, tab_feed, tab_kr = st.tabs(
+        ["전체", "🎬 릴스", "🖼️ 피드", "🇰🇷 한국 콘텐츠"]
+    )
+    with tab_all:  show_table(df)
+    with tab_reel: show_table(df[df["content_type"] == "reel"])
+    with tab_feed: show_table(df[df["content_type"].isin(["feed", "video_feed"])])
+    with tab_kr:   show_table(df[df["is_korean"]])
+
+
+if __name__ == "__main__":
+    main()

@@ -8,17 +8,14 @@ APIFY_TOKEN = os.getenv('APIFY_API_TOKEN')
 ACTOR_ID    = "apify/instagram-hashtag-scraper"
 OUTPUT_PATH = "data/latest_monitoring.csv"
 
-# 수집할 해시태그 목록
 KEYWORDS = ["meitu", "메이투", "뷰티캠", "beautycam"]
 
 
 def is_korean(text: str) -> bool:
-    """캡션에 한글이 포함되어 있으면 한국 콘텐츠로 분류"""
     return bool(re.search(r'[가-힣]', str(text)))
 
 
 def classify_content_type(row: pd.Series) -> str:
-    """productType / type 필드 기반 콘텐츠 유형 분류"""
     product_type = str(row.get("productType", "")).lower().strip()
     media_type   = str(row.get("type", "")).lower().strip()
     url          = str(row.get("url", ""))
@@ -33,7 +30,6 @@ def classify_content_type(row: pd.Series) -> str:
 
 
 def normalize(df: pd.DataFrame) -> pd.DataFrame:
-    """컬럼 통일 + 수치 변환 + 유형 분류 + 한국 콘텐츠 감지"""
     if "likesCount" not in df.columns:
         df["likesCount"] = df.get("likes", 0)
     for src in ("videoViewCount", "playCount", "videoPlayCount"):
@@ -47,6 +43,10 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
 
+    # 캡션 줄바꿈 문자 정리
+    if "caption" in df.columns:
+        df["caption"] = df["caption"].astype(str).str.replace(r'\\n', ' ', regex=True).str.strip()
+
     df["content_type"] = df.apply(classify_content_type, axis=1)
     df["is_korean"]    = df.get("caption", "").apply(is_korean)
     df["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -54,7 +54,6 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def append_and_dedup(new_df: pd.DataFrame) -> pd.DataFrame:
-    """기존 CSV에 추가 + id 기준 중복 제거"""
     os.makedirs("data", exist_ok=True)
     if os.path.exists(OUTPUT_PATH):
         existing = pd.read_csv(OUTPUT_PATH, dtype=str)
@@ -64,7 +63,6 @@ def append_and_dedup(new_df: pd.DataFrame) -> pd.DataFrame:
         print("📂 신규 파일 생성")
         combined = new_df.astype(str)
 
-    # 슬라이드 자식 row 제거
     if "content_type" in combined.columns:
         combined = combined[combined["content_type"] != "carousel_item"]
 
@@ -84,18 +82,20 @@ def fetch_data():
         client = ApifyClient(APIFY_TOKEN)
         all_results = []
 
-        for keyword in KEYWORDS:
-            print(f"🔍 #{keyword} 수집 중...")
-            run = client.actor(ACTOR_ID).call(run_input={
-                "hashtags":    [keyword],
-                "resultsLimit": 50,
-                "contentType": "both",  # 릴스 + 피드 동시 수집
-            })
-            results = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-            for r in results:
-                r["search_keyword"] = keyword
-            all_results.extend(results)
-            print(f"   → {len(results)}건 수집")
+        for results_type in ("posts", "reels"):
+            for keyword in KEYWORDS:
+                print(f"🔍 #{keyword} [{results_type}] 수집 중...")
+                run = client.actor(ACTOR_ID).call(run_input={
+                    "hashtags":     [keyword],
+                    "resultsLimit": 25,           # 키워드당 25건 (크레딧 절약)
+                    "resultsType":  results_type, # "posts" 또는 "reels"
+                    "keywordSearch": False,
+                })
+                results = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+                for r in results:
+                    r["search_keyword"] = keyword
+                all_results.extend(results)
+                print(f"   → {len(results)}건")
 
         if not all_results:
             print("⚠️ 수집된 데이터가 없습니다.")
@@ -105,9 +105,9 @@ def fetch_data():
 
         t = df["content_type"].value_counts()
         print(f"\n✅ 수집 완료: {len(df)}건")
-        print(f"   릴스:         {t.get('reel', 0)}건")
-        print(f"   피드:         {t.get('feed', 0)}건")
-        print(f"   한국 콘텐츠:  {df['is_korean'].sum()}건")
+        print(f"   릴스:        {t.get('reel', 0)}건")
+        print(f"   피드:        {t.get('feed', 0)}건")
+        print(f"   한국 콘텐츠: {df['is_korean'].sum()}건")
 
         final = append_and_dedup(df)
         final.to_csv(OUTPUT_PATH, index=False, encoding="utf-8-sig")

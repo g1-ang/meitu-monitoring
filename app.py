@@ -95,23 +95,20 @@ def fmt(n):
 
 
 def render_filters(df):
-    """사이드바 대신 페이지 상단 필터 (모바일 친화적)"""
     with st.expander("🔍 필터 열기", expanded=False):
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            ad_options = sorted(df["ad_type"].unique())
-            sel_ad = st.multiselect("콘텐츠 성격", ad_options, default=ad_options, key="ad")
-
-            countries = sorted(df["country"].unique())
+            ad_options  = sorted(df["ad_type"].unique())
+            sel_ad      = st.multiselect("콘텐츠 성격", ad_options, default=ad_options, key="ad")
+            countries   = sorted(df["country"].unique())
             sel_country = st.multiselect("국가", countries, default=countries, key="country")
 
         with col2:
-            labels = sorted(df["type_label"].unique())
+            labels   = sorted(df["type_label"].unique())
             sel_type = st.multiselect("콘텐츠 유형", labels, default=labels, key="type")
-
             if "search_keyword" in df.columns:
-                kws = sorted(df["search_keyword"].dropna().unique())
+                kws    = sorted(df["search_keyword"].dropna().unique())
                 sel_kw = st.multiselect("수집 키워드", kws, default=kws, key="kw")
             else:
                 sel_kw = []
@@ -123,7 +120,6 @@ def render_filters(df):
                 d = st.date_input("게시 기간", (min_d, max_d), min_value=min_d, max_value=max_d)
             else:
                 d = None
-
             st.markdown("<br>", unsafe_allow_html=True)
             st.download_button(
                 "📥 CSV 다운로드",
@@ -132,7 +128,6 @@ def render_filters(df):
                 use_container_width=True,
             )
 
-    # 필터 적용
     df = df[df["ad_type"].isin(sel_ad)]
     df = df[df["country"].isin(sel_country)]
     df = df[df["type_label"].isin(sel_type)]
@@ -148,6 +143,112 @@ def render_filters(df):
     return df
 
 
+def render_kpi_bar(df):
+    """KPI를 한 줄 가로 요약바로 표시 — 모바일에서도 한 줄"""
+    total   = len(df)
+    reels   = (df["content_type"] == "reel").sum()
+    feeds   = df["content_type"].isin(["feed","video_feed"]).sum()
+    korean  = df["is_korean"].sum()
+    ads     = (df["ad_type"] == "📢 광고").sum()
+    organic = (df["ad_type"] == "🌱 오가닉").sum()
+
+    st.markdown(
+        f"""
+        <div style="
+            display:flex; flex-wrap:nowrap; overflow-x:auto;
+            gap:0; background:var(--color-background-secondary);
+            border-radius:10px; padding:10px 4px;
+            margin-bottom:8px; white-space:nowrap;
+        ">
+            <div style="flex:1;min-width:60px;text-align:center;padding:0 6px;
+                        border-right:1px solid var(--color-border-tertiary);">
+                <div style="font-size:10px;color:var(--color-text-secondary);">📋 전체</div>
+                <div style="font-size:18px;font-weight:500;color:var(--color-text-primary);">{fmt(total)}</div>
+            </div>
+            <div style="flex:1;min-width:60px;text-align:center;padding:0 6px;
+                        border-right:1px solid var(--color-border-tertiary);">
+                <div style="font-size:10px;color:var(--color-text-secondary);">🎬 릴스</div>
+                <div style="font-size:18px;font-weight:500;color:#E1306C;">{fmt(reels)}</div>
+            </div>
+            <div style="flex:1;min-width:60px;text-align:center;padding:0 6px;
+                        border-right:1px solid var(--color-border-tertiary);">
+                <div style="font-size:10px;color:var(--color-text-secondary);">🖼️ 피드</div>
+                <div style="font-size:18px;font-weight:500;color:#405DE6;">{fmt(feeds)}</div>
+            </div>
+            <div style="flex:1;min-width:60px;text-align:center;padding:0 6px;
+                        border-right:1px solid var(--color-border-tertiary);">
+                <div style="font-size:10px;color:var(--color-text-secondary);">🇰🇷 한국</div>
+                <div style="font-size:18px;font-weight:500;color:var(--color-text-primary);">{fmt(korean)}</div>
+            </div>
+            <div style="flex:1;min-width:60px;text-align:center;padding:0 6px;
+                        border-right:1px solid var(--color-border-tertiary);">
+                <div style="font-size:10px;color:var(--color-text-secondary);">📢 광고</div>
+                <div style="font-size:18px;font-weight:500;color:#FF6B00;">{fmt(ads)}</div>
+            </div>
+            <div style="flex:1;min-width:60px;text-align:center;padding:0 6px;">
+                <div style="font-size:10px;color:var(--color-text-secondary);">🌱 오가닉</div>
+                <div style="font-size:18px;font-weight:500;color:#2E7D32;">{fmt(organic)}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+def render_charts_small(df):
+    """차트 3개를 작게 나란히 — 방법 A"""
+    cmap = {v: TYPE_COLOR.get(k, "#888") for k, v in TYPE_LABEL.items()}
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("**콘텐츠 유형**")
+        counts = df["type_label"].value_counts().reset_index()
+        counts.columns = ["유형", "건수"]
+        fig = px.pie(counts, names="유형", values="건수", hole=0.45,
+                     color="유형", color_discrete_map=cmap)
+        fig.update_traces(textposition="none")
+        fig.update_layout(
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=-0.35,
+                        xanchor="center", x=0.5, font=dict(size=9)),
+            margin=dict(t=5, b=40, l=5, r=5),
+            height=180,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        st.markdown("**광고 vs 오가닉**")
+        ad_counts = df["ad_type"].value_counts().reset_index()
+        ad_counts.columns = ["유형", "건수"]
+        fig2 = px.pie(ad_counts, names="유형", values="건수", hole=0.45,
+                      color="유형",
+                      color_discrete_map={"📢 광고": "#FF6B00", "🌱 오가닉": "#2E7D32"})
+        fig2.update_traces(textposition="none")
+        fig2.update_layout(
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=-0.35,
+                        xanchor="center", x=0.5, font=dict(size=9)),
+            margin=dict(t=5, b=40, l=5, r=5),
+            height=180,
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+    with col3:
+        st.markdown("**국가별 분포**")
+        country_counts = df["country"].value_counts().reset_index()
+        country_counts.columns = ["국가", "건수"]
+        fig3 = px.bar(country_counts, x="국가", y="건수",
+                      labels={"국가": "", "건수": ""})
+        fig3.update_layout(
+            showlegend=False,
+            margin=dict(t=5, b=5, l=5, r=5),
+            height=180,
+            xaxis=dict(tickfont=dict(size=9)),
+            yaxis=dict(tickfont=dict(size=9)),
+        )
+        st.plotly_chart(fig3, use_container_width=True)
+
+
 def show_cards(sub_df):
     if sub_df.empty:
         st.info("해당 데이터가 없습니다.")
@@ -155,7 +256,6 @@ def show_cards(sub_df):
 
     top = sub_df.nlargest(50, "engagement").reset_index(drop=True)
 
-    # PC: 4열 / 모바일: 2열 — st.columns로 4열 고정 후 CSS로 모바일 대응
     cols_per_row = 4
     for i in range(0, len(top), cols_per_row):
         cols = st.columns(cols_per_row)
@@ -166,7 +266,6 @@ def show_cards(sub_df):
             row = top.iloc[idx]
 
             with col:
-                # 썸네일
                 thumb = str(row.get("displayUrl", ""))
                 if thumb and thumb not in ("nan", ""):
                     try:
@@ -175,21 +274,16 @@ def show_cards(sub_df):
                         st.markdown(
                             "<div style='background:#f0f0f0;height:120px;border-radius:8px;"
                             "display:flex;align-items:center;justify-content:center;"
-                            "font-size:28px;'>🖼️</div>",
-                            unsafe_allow_html=True
-                        )
+                            "font-size:28px;'>🖼️</div>", unsafe_allow_html=True)
                 else:
                     st.markdown(
                         "<div style='background:#f0f0f0;height:120px;border-radius:8px;"
                         "display:flex;align-items:center;justify-content:center;"
-                        "font-size:28px;'>🖼️</div>",
-                        unsafe_allow_html=True
-                    )
+                        "font-size:28px;'>🖼️</div>", unsafe_allow_html=True)
 
-                # 유형 + 광고 배지
                 type_colors = {"릴스": "#E1306C", "피드": "#405DE6", "피드(동영상)": "#833AB4"}
-                t_color   = type_colors.get(row["type_label"], "#888")
-                ad_color  = "#FF6B00" if row["ad_type"] == "📢 광고" else "#2E7D32"
+                t_color  = type_colors.get(row["type_label"], "#888")
+                ad_color = "#FF6B00" if row["ad_type"] == "📢 광고" else "#2E7D32"
 
                 st.markdown(
                     f'<div style="margin-top:5px;display:flex;gap:3px;flex-wrap:wrap;">'
@@ -197,43 +291,28 @@ def show_cards(sub_df):
                     f'padding:1px 6px;border-radius:10px;">{row["type_label"]}</span>'
                     f'<span style="background:{ad_color};color:white;font-size:10px;'
                     f'padding:1px 6px;border-radius:10px;">{row["ad_type"]}</span>'
-                    f'</div>',
-                    unsafe_allow_html=True
-                )
+                    f'</div>', unsafe_allow_html=True)
 
-                # 날짜 + 국가
                 date_str = row["timestamp"].strftime("%Y-%m-%d") if pd.notna(row["timestamp"]) else "-"
                 st.markdown(
                     f'<div style="font-size:11px;color:#888;margin-top:3px;">'
-                    f'{date_str}<br>{row.get("country","")}</div>',
-                    unsafe_allow_html=True
-                )
+                    f'{date_str} | {row.get("country","")}</div>', unsafe_allow_html=True)
 
-                # 작성자
-                username = str(row.get("ownerUsername", "-"))
                 st.markdown(
                     f'<div style="font-size:12px;font-weight:500;margin-top:2px;">'
-                    f'@{username}</div>',
-                    unsafe_allow_html=True
-                )
+                    f'@{str(row.get("ownerUsername","-"))}</div>', unsafe_allow_html=True)
 
-                # 주요지표 + 댓글
                 metric = f"▶ {fmt(row['videoPlayCount'])}" if row["content_type"] == "reel" else f"❤ {fmt(row['likesCount'])}"
                 st.markdown(
                     f'<div style="font-size:12px;margin-top:3px;">'
-                    f'{metric} &nbsp; 💬 {fmt(row["commentsCount"])}</div>',
-                    unsafe_allow_html=True
-                )
+                    f'{metric} &nbsp; 💬 {fmt(row["commentsCount"])}</div>', unsafe_allow_html=True)
 
-                # 링크
                 url = str(row.get("url", ""))
                 if url.startswith("http"):
                     st.markdown(
                         f'<a href="{url}" target="_blank" '
                         f'style="font-size:11px;color:#E1306C;text-decoration:none;">'
-                        f'📎 보기</a>',
-                        unsafe_allow_html=True
-                    )
+                        f'📎 보기</a>', unsafe_allow_html=True)
 
                 st.markdown("<div style='margin-bottom:12px;'></div>", unsafe_allow_html=True)
 
@@ -253,59 +332,19 @@ def main():
             f"| 누적: **{len(df):,}건**"
         )
 
-    # 필터 (페이지 상단 expander)
     df = render_filters(df)
 
     if df.empty:
         st.info("필터 조건에 맞는 데이터가 없습니다.")
         return
 
-    st.divider()
-
-    # KPI
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("📋 전체",         fmt(len(df)))
-    c2.metric("🎬 릴스",         fmt((df["content_type"] == "reel").sum()))
-    c3.metric("🖼️ 피드",         fmt(df["content_type"].isin(["feed","video_feed"]).sum()))
-    c4.metric("🇰🇷 한국",        fmt(df["is_korean"].sum()))
-    c5.metric("📢 광고",         fmt((df["ad_type"] == "📢 광고").sum()))
-    c6.metric("🌱 오가닉",       fmt((df["ad_type"] == "🌱 오가닉").sum()))
+    # KPI 한 줄 요약바
+    render_kpi_bar(df)
 
     st.divider()
 
-    # 차트
-    cmap = {v: TYPE_COLOR.get(k, "#888") for k, v in TYPE_LABEL.items()}
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.subheader("콘텐츠 유형")
-        counts = df["type_label"].value_counts().reset_index()
-        counts.columns = ["유형", "건수"]
-        fig = px.pie(counts, names="유형", values="건수", hole=0.4,
-                     color="유형", color_discrete_map=cmap)
-        fig.update_traces(textposition="outside", textinfo="percent+label")
-        fig.update_layout(showlegend=False, margin=dict(t=20, b=0, l=0, r=0))
-        st.plotly_chart(fig, use_container_width=True)
-
-    with col2:
-        st.subheader("광고 vs 오가닉")
-        ad_counts = df["ad_type"].value_counts().reset_index()
-        ad_counts.columns = ["유형", "건수"]
-        fig2 = px.pie(ad_counts, names="유형", values="건수", hole=0.4,
-                      color="유형",
-                      color_discrete_map={"📢 광고": "#FF6B00", "🌱 오가닉": "#2E7D32"})
-        fig2.update_traces(textposition="outside", textinfo="percent+label")
-        fig2.update_layout(showlegend=False, margin=dict(t=20, b=0, l=0, r=0))
-        st.plotly_chart(fig2, use_container_width=True)
-
-    with col3:
-        st.subheader("국가별 분포")
-        country_counts = df["country"].value_counts().reset_index()
-        country_counts.columns = ["국가", "건수"]
-        fig3 = px.bar(country_counts, x="국가", y="건수",
-                      labels={"국가": "", "건수": "건수"})
-        fig3.update_layout(showlegend=False, margin=dict(t=20, b=0))
-        st.plotly_chart(fig3, use_container_width=True)
+    # 차트 3개 나란히 (방법 A)
+    render_charts_small(df)
 
     st.divider()
 

@@ -5,13 +5,32 @@ from utils import load_and_process, fmt, render_card_grid
 
 st.set_page_config(page_title="Meitu 세부", page_icon="🔍", layout="wide")
 
+COUNTRY_ORDER = ["🇰🇷 한국", "🇯🇵 일본", "🇨🇳 중국/대만", "🇹🇭 태국", "🌐 영어권", "🇪🇺 유럽", "🌏 기타"]
+
 
 @st.cache_data(ttl=300)
 def load_data():
     return load_and_process("data/latest_monitoring.csv")
 
 
+def top_nav(current: str):
+    col1, col2, col3 = st.columns([1, 1, 8])
+    with col1:
+        if current == "summary":
+            st.markdown('<div style="background:#E1306C;color:white;text-align:center;padding:6px 0;border-radius:20px;font-size:14px;font-weight:500;">📊 요약</div>', unsafe_allow_html=True)
+        else:
+            st.page_link("app.py", label="📊 요약")
+    with col2:
+        if current == "details":
+            st.markdown('<div style="background:#E1306C;color:white;text-align:center;padding:6px 0;border-radius:20px;font-size:14px;font-weight:500;">🔍 세부</div>', unsafe_allow_html=True)
+        else:
+            st.page_link("pages/details.py", label="🔍 세부")
+
+
+# ── 메인 ──────────────────────────────────────────────────────────────────────
 df_all = load_data()
+
+top_nav("details")
 
 st.markdown("## 🔍 Meitu 모니터링 — 세부")
 
@@ -28,8 +47,12 @@ st.divider()
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    countries   = ["전체"] + sorted(df_all["country"].unique())
-    sel_country = st.selectbox("🌍 국가", countries, index=0)
+    available_countries = [c for c in COUNTRY_ORDER if c in df_all["country"].unique()]
+    sel_countries = st.multiselect(
+        "🌍 국가 (복수 선택 가능)",
+        options=available_countries,
+        default=available_countries,
+    )
 
 with col2:
     now      = datetime.now(timezone.utc)
@@ -53,8 +76,8 @@ with col4:
 # 필터 적용
 filtered = df_all.copy()
 
-if sel_country != "전체":
-    filtered = filtered[filtered["country"] == sel_country]
+if sel_countries:
+    filtered = filtered[filtered["country"].isin(sel_countries)]
 
 if start_d and end_d:
     filtered = filtered[
@@ -73,7 +96,6 @@ if sel_ad != "전체":
 st.caption(f"필터 결과: **{len(filtered):,}건**")
 st.divider()
 
-# ── 게시물 카드 ────────────────────────────────────────────────────────────────
 st.subheader("📋 게시물 목록")
 st.caption("인게이지먼트 기준 상위 50건 | 링크 클릭 시 인스타그램으로 이동")
 

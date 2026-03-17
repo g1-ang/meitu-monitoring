@@ -4,8 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 st.set_page_config(page_title="트위터 모니터링", page_icon="🐦", layout="wide")
 
-COUNTRY_ORDER = ["🇰🇷 한국", "🇯🇵 일본", "🇨🇳 중국/대만", "🇹🇭 태국", "🌐 영어권", "🇪🇺 유럽", "🌏 기타"]
-KEYWORDS      = ["meitu", "메이투", "뷰티캠"]
+KEYWORDS = ["meitu", "메이투", "뷰티캠"]
 
 
 @st.cache_data(ttl=300)
@@ -41,18 +40,23 @@ def top_nav():
 
 
 def render_kpi(df):
-    total    = len(df)
-    korean   = (df["country"] == "🇰🇷 한국").sum()
-    avg_like = df["like_count"].mean()
-    avg_rt   = df["retweet_count"].mean()
-    avg_view = df["view_count"].mean()
+    """KPI — 메이투 건수 / 뷰티캠 건수 / 평균 지표"""
+    meitu_df   = df[df["search_keyword"].isin(["meitu", "메이투"])]
+    beautycam_df = df[df["search_keyword"] == "뷰티캠"]
+
+    total      = len(df)
+    meitu_cnt  = len(meitu_df)
+    beauty_cnt = len(beautycam_df)
+    avg_like   = df["like_count"].mean()
+    avg_rt     = df["retweet_count"].mean()
+    avg_view   = df["view_count"].mean()
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("🐦 전체 트윗",    fmt(total))
-    c2.metric("🇰🇷 한국",        fmt(korean))
-    c3.metric("❤️ 평균 좋아요",  f"{avg_like:.1f}")
-    c4.metric("🔁 평균 리트윗",  f"{avg_rt:.1f}")
-    c5.metric("👁️ 평균 조회수",  fmt(avg_view))
+    c1.metric("🐦 전체 트윗",        fmt(total))
+    c2.metric("📌 meitu + 메이투",   fmt(meitu_cnt))
+    c3.metric("📌 뷰티캠",           fmt(beauty_cnt))
+    c4.metric("❤️ 평균 좋아요",      f"{avg_like:.1f}")
+    c5.metric("👁️ 평균 조회수",      fmt(avg_view))
 
 
 def render_tweet_cards(df):
@@ -62,7 +66,6 @@ def render_tweet_cards(df):
 
     top = df.nlargest(50, "engagement").reset_index(drop=True)
 
-    # 4열 그리드
     cols_per_row = 4
     for i in range(0, len(top), cols_per_row):
         cols = st.columns(cols_per_row)
@@ -75,28 +78,56 @@ def render_tweet_cards(df):
             with col:
                 date_str = row["created_at"].strftime("%Y-%m-%d %H:%M") if pd.notna(row["created_at"]) else "-"
                 url      = str(row.get("url", ""))
-                text     = str(row.get("text", ""))[:120] + ("..." if len(str(row.get("text", ""))) > 120 else "")
+                text     = str(row.get("text", ""))
                 handle   = str(row.get("author_handle", "-"))
-                name     = str(row.get("author_name", "-"))
-                country  = str(row.get("country", ""))
                 keyword  = str(row.get("search_keyword", ""))
                 link     = f'<a href="{url}" target="_blank" style="font-size:10px;color:#1D9BF0;text-decoration:none;">🔗 원문 보기</a>' if url.startswith("http") else ""
 
+                # 트윗 이미지 추출 (URL에서 pic.twitter.com 또는 t.co 이미지)
+                media_url = str(row.get("media_url", "")) if "media_url" in row else ""
+                images    = str(row.get("images", ""))    if "images" in row else ""
+
+                # 텍스트에서 URL 제거 (깔끔하게)
+                import re
+                clean_text = re.sub(r'https?://\S+', '', text).strip()
+                if len(clean_text) > 120:
+                    clean_text = clean_text[:120] + "..."
+
+                # 이미지 표시
+                img_html = ""
+                if media_url and media_url not in ("nan", ""):
+                    img_html = f'<img src="{media_url}" style="width:100%;border-radius:8px;margin-bottom:6px;aspect-ratio:16/9;object-fit:cover;" onerror="this.style.display=\'none\'">'
+                elif images and images not in ("nan", "[]", ""):
+                    # images 컬럼에서 첫 번째 URL 추출
+                    import ast
+                    try:
+                        img_list = ast.literal_eval(images)
+                        if img_list:
+                            img_html = f'<img src="{img_list[0]}" style="width:100%;border-radius:8px;margin-bottom:6px;aspect-ratio:16/9;object-fit:cover;" onerror="this.style.display=\'none\'">'
+                    except:
+                        pass
+
                 st.markdown(
                     f"""
-                    <div style="background:var(--background-color,#fff);border:0.5px solid rgba(128,128,128,0.2);
-                                border-radius:12px;padding:12px;margin-bottom:4px;min-height:180px;">
-                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                            <span style="background:#E8F5FE;color:#1D9BF0;font-size:9px;font-weight:500;
-                                         padding:1px 7px;border-radius:10px;">#{keyword}</span>
-                            <span style="font-size:10px;color:#888;">{country}</span>
+                    <div style="background:var(--background-color,#fff);
+                                border:0.5px solid rgba(128,128,128,0.2);
+                                border-radius:12px;padding:12px;margin-bottom:4px;">
+                        {img_html}
+                        <div style="display:flex;justify-content:space-between;
+                                    align-items:center;margin-bottom:6px;">
+                            <span style="background:#E8F5FE;color:#1D9BF0;font-size:9px;
+                                         font-weight:500;padding:1px 7px;border-radius:10px;">
+                                #{keyword}
+                            </span>
+                            <span style="font-size:10px;color:#888;">{date_str}</span>
                         </div>
                         <div style="font-size:11px;color:var(--color-text-primary,#000);
-                                    line-height:1.5;margin-bottom:8px;">{text}</div>
-                        <div style="font-size:10px;color:#888;margin-bottom:4px;">
-                            @{handle} · {date_str}
+                                    line-height:1.5;margin-bottom:8px;">{clean_text}</div>
+                        <div style="font-size:10px;color:#888;margin-bottom:6px;">
+                            @{handle}
                         </div>
-                        <div style="display:flex;gap:10px;font-size:11px;color:#666;margin-bottom:6px;">
+                        <div style="display:flex;gap:10px;font-size:11px;
+                                    color:#666;margin-bottom:6px;">
                             <span>❤️ {fmt(row['like_count'])}</span>
                             <span>🔁 {fmt(row['retweet_count'])}</span>
                             <span>💬 {fmt(row['reply_count'])}</span>
@@ -129,16 +160,13 @@ if df["last_updated"].notna().any():
 
 st.divider()
 
-# 필터
-col1, col2, col3 = st.columns(3)
+# 필터 — 기간 + 키워드만
+col1, col2 = st.columns(2)
 
 with col1:
-    available = [c for c in COUNTRY_ORDER if c in df["country"].unique()]
-    sel_countries = st.multiselect("🌍 국가", options=available, default=available)
-
-with col2:
     now      = datetime.now(timezone.utc)
-    period   = st.radio("📅 기간", ["최근 7일", "최근 1개월", "최근 3개월", "전체"],
+    period   = st.radio("📅 기간",
+                        ["최근 7일", "최근 1개월", "최근 3개월", "전체"],
                         index=3, horizontal=True)
     days_map = {"최근 7일": 7, "최근 1개월": 30, "최근 3개월": 90, "전체": None}
     days     = days_map[period]
@@ -149,13 +177,15 @@ with col2:
         start_d = df["created_at"].min().date() if df["created_at"].notna().any() else None
         end_d   = df["created_at"].max().date() if df["created_at"].notna().any() else None
 
-with col3:
-    sel_keywords = st.multiselect("🔍 키워드", options=KEYWORDS, default=KEYWORDS)
+with col2:
+    sel_keywords = st.multiselect(
+        "🔍 키워드",
+        options=KEYWORDS,
+        default=KEYWORDS
+    )
 
 # 필터 적용
 filtered = df.copy()
-if sel_countries:
-    filtered = filtered[filtered["country"].isin(sel_countries)]
 if start_d and end_d:
     filtered = filtered[
         (filtered["created_at"].dt.date >= start_d) &
@@ -171,25 +201,21 @@ st.divider()
 render_kpi(filtered)
 st.divider()
 
-# 키워드별 탭
+# 트윗 목록
 st.subheader("📋 트윗 목록")
 st.caption("인게이지먼트(좋아요+리트윗+댓글) 기준 상위 50건 | 원문 보기 클릭 시 트위터로 이동")
 
-tab_all, tab_meitu, tab_korean, tab_japanese = st.tabs([
+tab_all, tab_meitu, tab_beautycam = st.tabs([
     "전체",
-    "meitu / 메이투 / 뷰티캠",
-    "🇰🇷 한국",
-    "🇯🇵 일본",
+    "meitu / 메이투",
+    "뷰티캠",
 ])
 
 with tab_all:
     render_tweet_cards(filtered)
 
 with tab_meitu:
-    render_tweet_cards(filtered[filtered["search_keyword"].isin(["meitu", "메이투", "뷰티캠"])])
+    render_tweet_cards(filtered[filtered["search_keyword"].isin(["meitu", "메이투"])])
 
-with tab_korean:
-    render_tweet_cards(filtered[filtered["country"] == "🇰🇷 한국"])
-
-with tab_japanese:
-    render_tweet_cards(filtered[filtered["country"] == "🇯🇵 일본"])
+with tab_beautycam:
+    render_tweet_cards(filtered[filtered["search_keyword"] == "뷰티캠"])

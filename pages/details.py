@@ -27,17 +27,22 @@ def load_data():
 
 
 def top_nav(current):
-    col1, col2, col3 = st.columns([1, 1, 8])
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 7])
     with col1:
         if current == "summary":
-            st.markdown('<span style="display:block;text-align:center;background:#E1306C;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">📊 요약</span>', unsafe_allow_html=True)
+            st.markdown('<span style="display:block;text-align:center;background:#E1306C;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">📊 IG 요약</span>', unsafe_allow_html=True)
         else:
-            st.page_link("app.py", label="📊 요약")
+            st.page_link("app.py", label="📊 IG 요약")
     with col2:
         if current == "details":
-            st.markdown('<span style="display:block;text-align:center;background:#E1306C;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">🔍 세부</span>', unsafe_allow_html=True)
+            st.markdown('<span style="display:block;text-align:center;background:#E1306C;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">🔍 IG 세부</span>', unsafe_allow_html=True)
         else:
-            st.page_link("pages/details.py", label="🔍 세부")
+            st.page_link("pages/details.py", label="🔍 IG 세부")
+    with col3:
+        if current == "twitter":
+            st.markdown('<span style="display:block;text-align:center;background:#1D9BF0;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">🐦 트위터</span>', unsafe_allow_html=True)
+        else:
+            st.page_link("pages/twitter.py", label="🐦 트위터")
     st.markdown("<div style='margin-bottom:8px;'></div>", unsafe_allow_html=True)
 
 

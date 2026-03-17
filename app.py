@@ -27,17 +27,22 @@ def load_data():
 
 
 def top_nav(current):
-    col1, col2, col3 = st.columns([1, 1, 8])
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 7])
     with col1:
         if current == "summary":
-            st.markdown('<span style="display:block;text-align:center;background:#E1306C;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">📊 요약</span>', unsafe_allow_html=True)
+            st.markdown('<span style="display:block;text-align:center;background:#E1306C;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">📊 IG 요약</span>', unsafe_allow_html=True)
         else:
-            st.page_link("app.py", label="📊 요약")
+            st.page_link("app.py", label="📊 IG 요약")
     with col2:
         if current == "details":
-            st.markdown('<span style="display:block;text-align:center;background:#E1306C;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">🔍 세부</span>', unsafe_allow_html=True)
+            st.markdown('<span style="display:block;text-align:center;background:#E1306C;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">🔍 IG 세부</span>', unsafe_allow_html=True)
         else:
-            st.page_link("pages/details.py", label="🔍 세부")
+            st.page_link("pages/details.py", label="🔍 IG 세부")
+    with col3:
+        if current == "twitter":
+            st.markdown('<span style="display:block;text-align:center;background:#1D9BF0;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">🐦 트위터</span>', unsafe_allow_html=True)
+        else:
+            st.page_link("pages/twitter.py", label="🐦 트위터")
     st.markdown("<div style='margin-bottom:8px;'></div>", unsafe_allow_html=True)
 
 
@@ -61,32 +66,27 @@ def render_kpi_bar(this_week, last_week):
 def render_charts(df):
     cmap = {v: TYPE_COLOR.get(k, "#888") for k, v in TYPE_LABEL.items()}
     col1, col2, col3 = st.columns(3)
-
     with col1:
         st.markdown("**콘텐츠 유형**")
         counts = df["type_label"].value_counts().reset_index()
         counts.columns = ["유형", "건수"]
-        fig = px.pie(counts, names="유형", values="건수", hole=0.45,
-                     color="유형", color_discrete_map=cmap)
+        fig = px.pie(counts, names="유형", values="건수", hole=0.45, color="유형", color_discrete_map=cmap)
         fig.update_traces(textposition="none")
         fig.update_layout(showlegend=True,
             legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5, font=dict(size=9)),
             margin=dict(t=5, b=40, l=5, r=5), height=180)
         st.plotly_chart(fig, use_container_width=True)
-
     with col2:
         st.markdown("**광고 vs 오가닉**")
         ad_counts = df["ad_type"].value_counts().reset_index()
         ad_counts.columns = ["유형", "건수"]
-        fig2 = px.pie(ad_counts, names="유형", values="건수", hole=0.45,
-                      color="유형",
+        fig2 = px.pie(ad_counts, names="유형", values="건수", hole=0.45, color="유형",
                       color_discrete_map={"📢 광고": "#FF6B00", "🌱 오가닉": "#2E7D32"})
         fig2.update_traces(textposition="none")
         fig2.update_layout(showlegend=True,
             legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5, font=dict(size=9)),
             margin=dict(t=5, b=40, l=5, r=5), height=180)
         st.plotly_chart(fig2, use_container_width=True)
-
     with col3:
         st.markdown("**국가별 분포**")
         cc = df["country"].value_counts().reset_index()
@@ -94,8 +94,7 @@ def render_charts(df):
         fig3 = px.bar(cc, x="국가", y="건수", labels={"국가": "", "건수": ""})
         fig3.update_layout(showlegend=False,
             margin=dict(t=5, b=5, l=5, r=5), height=180,
-            xaxis=dict(tickfont=dict(size=9)),
-            yaxis=dict(tickfont=dict(size=9)))
+            xaxis=dict(tickfont=dict(size=9)), yaxis=dict(tickfont=dict(size=9)))
         st.plotly_chart(fig3, use_container_width=True)
 
 
@@ -149,19 +148,14 @@ def render_top5_cards(sub_df, metric_col):
                 f'<div style="font-size:10px;color:#888;margin-top:3px;">{date_str} | {row.get("country","")}</div>'
                 f'<div style="font-size:11px;font-weight:500;">@{str(row.get("ownerUsername","-"))}</div>'
                 f'<div style="font-size:12px;">{metric}</div>'
-                f'{link}'
-                f'</div>',
+                f'{link}</div>',
                 unsafe_allow_html=True)
 
 
 def render_top5(brand_df, category_df):
     st.subheader("🏆 이번 주 TOP 5")
     st.caption("릴스: 조회수 기준 / 피드: 좋아요 기준 / 카테고리: 인게이지먼트 기준")
-    tab_reel, tab_feed, tab_category = st.tabs([
-        "🎬 경쟁사 릴스 TOP 5",
-        "🖼️ 경쟁사 피드 TOP 5",
-        "📂 카테고리 TOP 5",
-    ])
+    tab_reel, tab_feed, tab_category = st.tabs(["🎬 경쟁사 릴스 TOP 5", "🖼️ 경쟁사 피드 TOP 5", "📂 카테고리 TOP 5"])
     with tab_reel:
         render_top5_cards(brand_df[brand_df["content_type"] == "reel"], "videoPlayCount")
     with tab_feed:
@@ -187,8 +181,8 @@ st.divider()
 
 this_start, this_end = get_week_range(weeks_ago=0)
 last_start, last_end = get_week_range(weeks_ago=1)
-this_week = get_weekly_df(filtered_df, weeks_ago=0)
-last_week = get_weekly_df(filtered_df, weeks_ago=1)
+this_week   = get_weekly_df(filtered_df, weeks_ago=0)
+last_week   = get_weekly_df(filtered_df, weeks_ago=1)
 
 st.markdown(
     f"**이번 주** {this_start.strftime('%m/%d')} ~ {(this_end - pd.Timedelta(days=1)).strftime('%m/%d')}"

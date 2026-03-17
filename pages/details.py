@@ -3,7 +3,11 @@ import streamlit as st
 from datetime import datetime, timedelta, timezone
 from utils import load_and_process, fmt, render_card_grid
 
-st.set_page_config(page_title="Meitu 세부", page_icon="🔍", layout="wide")
+st.set_page_config(
+    page_title="세부 페이지",
+    page_icon="🔍",
+    layout="wide"
+)
 
 COUNTRY_ORDER = ["🇰🇷 한국", "🇯🇵 일본", "🇨🇳 중국/대만", "🇹🇭 태국", "🌐 영어권", "🇪🇺 유럽", "🌏 기타"]
 
@@ -17,14 +21,15 @@ def top_nav(current: str):
     col1, col2, col3 = st.columns([1, 1, 8])
     with col1:
         if current == "summary":
-            st.markdown('<div style="background:#E1306C;color:white;text-align:center;padding:6px 0;border-radius:20px;font-size:14px;font-weight:500;">📊 요약</div>', unsafe_allow_html=True)
+            st.markdown('<span style="display:block;text-align:center;background:#E1306C;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">📊 요약</span>', unsafe_allow_html=True)
         else:
             st.page_link("app.py", label="📊 요약")
     with col2:
         if current == "details":
-            st.markdown('<div style="background:#E1306C;color:white;text-align:center;padding:6px 0;border-radius:20px;font-size:14px;font-weight:500;">🔍 세부</div>', unsafe_allow_html=True)
+            st.markdown('<span style="display:block;text-align:center;background:#E1306C;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">🔍 세부</span>', unsafe_allow_html=True)
         else:
             st.page_link("pages/details.py", label="🔍 세부")
+    st.markdown("<div style='margin-bottom:8px;'></div>", unsafe_allow_html=True)
 
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
@@ -43,7 +48,6 @@ if df_all["last_updated"].notna().any():
 
 st.divider()
 
-# ── 필터 ──────────────────────────────────────────────────────────────────────
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
@@ -73,7 +77,6 @@ with col3:
 with col4:
     sel_ad = st.radio("📣 광고 여부", ["전체", "📢 광고", "🌱 오가닉"], index=0)
 
-# 필터 적용
 filtered = df_all.copy()
 
 if sel_countries:

@@ -2,8 +2,8 @@ name: Instagram & Twitter Data Update
 
 on:
   schedule:
-    - cron: '0 0 * * 1'  # 매주 월요일 09:00 KST — 인스타 전체 + 트위터
-    - cron: '0 0 * * 4'  # 매주 목요일 09:00 KST — 인스타 브랜드 + 트위터
+    - cron: '0 0 * * 1'  # 매주 월요일 09:00 KST
+    - cron: '0 0 * * 4'  # 매주 목요일 09:00 KST
   workflow_dispatch:
     inputs:
       mode:
@@ -45,3 +45,8 @@ jobs:
           git add data/
           git diff --staged --quiet || git commit -m "Auto-update data: $(date +'%Y-%m-%d %H:%M:%S UTC')"
           git push origin main
+
+      - name: Send Slack notification
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python notify_slack.py

@@ -1,44 +1,43 @@
-name: Weekly Data Update
+name: Instagram Data Update
 
 on:
   schedule:
-    - cron: '0 0 * * 1'
-  workflow_dispatch: # 직접 실행 버튼용
+    - cron: '0 0 * * 1'  # 매주 월요일 09:00 KST — 브랜드 + 카테고리 전체 수집
+    - cron: '0 0 * * 4'  # 매주 목요일 09:00 KST — 브랜드 키워드만 수집
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '수집 모드 (all: 전체 / brand: 브랜드만)'
+        required: false
+        default: 'all'
 
 jobs:
   update:
     runs-on: ubuntu-latest
-    # [핵심] 깃허브 로봇에게 쓰기 권한을 명시적으로 부여합니다.
     permissions:
       contents: write
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          pip install pandas apify-client
+        run: pip install pandas apify-client
 
       - name: Run update script
         env:
           APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+          # 월요일(1)이면 all, 목요일(4)이면 brand
+          COLLECT_MODE: ${{ github.event.inputs.mode || (github.event.schedule == '0 0 * * 1' && 'all' || 'brand') }}
         run: python update_data.py
 
-      - name: Commit and Push changes
+      - name: Commit and Push
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-          git add data/latest_monitoring.csv
-          
-          # 변경사항이 있든 없든 무조건 커밋하도록 만듭니다.
-          git commit -m "Auto-update data: $(date)" || exit 0
-          
-          # 현재 브랜치에 강제로 밀어넣기
-          git push origin main --force
+          git add data/
+          git diff --staged --quiet || git commit -m "Auto-update data: $(date +'%Y-%m-%d %H:%M:%S UTC')"
+          git push origin main

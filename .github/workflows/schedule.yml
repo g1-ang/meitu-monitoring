@@ -1,9 +1,9 @@
-name: Instagram Data Update
+name: Instagram & Twitter Data Update
 
 on:
   schedule:
-    - cron: '0 0 * * 1'  # 매주 월요일 09:00 KST — 브랜드 + 카테고리 전체 수집
-    - cron: '0 0 * * 4'  # 매주 목요일 09:00 KST — 브랜드 키워드만 수집
+    - cron: '0 0 * * 1'  # 매주 월요일 09:00 KST — 인스타 전체 + 트위터
+    - cron: '0 0 * * 4'  # 매주 목요일 09:00 KST — 인스타 브랜드 + 트위터
   workflow_dispatch:
     inputs:
       mode:
@@ -27,12 +27,16 @@ jobs:
       - name: Install dependencies
         run: pip install pandas apify-client
 
-      - name: Run update script
+      - name: Run Instagram update
         env:
           APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
-          # 월요일(1)이면 all, 목요일(4)이면 brand
           COLLECT_MODE: ${{ github.event.inputs.mode || (github.event.schedule == '0 0 * * 1' && 'all' || 'brand') }}
         run: python update_data.py
+
+      - name: Run Twitter update
+        env:
+          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+        run: python update_data_twitter.py
 
       - name: Commit and Push
         run: |

@@ -4,14 +4,26 @@ import pandas as pd
 from apify_client import ApifyClient
 from datetime import datetime
 
-APIFY_TOKEN = os.getenv('APIFY_API_TOKEN')
-ACTOR_ID    = "apify/instagram-hashtag-scraper"
-OUTPUT_PATH = "data/latest_monitoring.csv"
+APIFY_TOKEN   = os.getenv('APIFY_API_TOKEN')
+ACTOR_ID      = "apify/instagram-hashtag-scraper"
+OUTPUT_PATH   = "data/latest_monitoring.csv"
+COLLECT_MODE  = os.getenv('COLLECT_MODE', 'all')  # 'all' or 'brand'
 
-KEYWORDS = ["meitu", "메이투", "뷰티캠", "beautycam"]
+# ── 브랜드 해시태그 (주 2회 수집) ─────────────────────────────────────────────
+BRAND_KEYWORDS = [
+    "meitu", "메이투", "뷰티캠", "beautycam",
+]
 
-# 브랜디드 콘텐츠 감지 대상 계정
-BRANDED_ACCOUNTS = ["meitu.kr", "beautycam.kr", "meitu_korea", "beautycam_korea"]
+# ── 카테고리 해시태그 (월요일만 수집) ─────────────────────────────────────────
+CATEGORY_KEYWORDS = [
+    "보정", "사진편집", "ai보정",
+]
+
+# ── 브랜디드 콘텐츠 감지 대상 계정 ────────────────────────────────────────────
+BRANDED_ACCOUNTS = [
+    "meitu.kr", "meitu.app", "meitu.jp", "meitutw",
+    "beautycam.kr", "beautycam.app", "beautycam.jp",
+]
 
 
 def is_korean(text: str) -> bool:
@@ -35,15 +47,9 @@ def classify_content_type(row: pd.Series) -> str:
 
 
 def detect_branded_content(item: dict) -> bool:
-    """
-    브랜디드 콘텐츠 감지:
-    1. coauthorProducers 필드에 meitu.kr / beautycam.kr 계정이 있는지 확인
-    2. 없으면 False 반환 (캡션 키워드 감지는 utils.py에서 별도 처리)
-    """
     coauthors = item.get("coauthorProducers", [])
     if not coauthors or not isinstance(coauthors, list):
         return False
-
     for author in coauthors:
         if isinstance(author, dict):
             username = str(author.get("username", "")).lower()
@@ -53,7 +59,6 @@ def detect_branded_content(item: dict) -> bool:
 
 
 def normalize(df: pd.DataFrame, raw_items: list) -> pd.DataFrame:
-    """컬럼 통일 + 수치 변환 + 유형 분류 + 브랜디드 콘텐츠 감지"""
     if "likesCount" not in df.columns:
         df["likesCount"] = df.get("likes", 0)
     for src in ("videoViewCount", "playCount", "videoPlayCount"):
@@ -67,7 +72,6 @@ def normalize(df: pd.DataFrame, raw_items: list) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
 
-    # 캡션 정리
     if "caption" in df.columns:
         df["caption"] = (
             df["caption"].astype(str)
@@ -80,15 +84,9 @@ def normalize(df: pd.DataFrame, raw_items: list) -> pd.DataFrame:
     df["is_korean"]    = df.get("caption", "").apply(is_korean)
     df["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # 브랜디드 콘텐츠 여부 저장
     branded_flags = [detect_branded_content(item) for item in raw_items]
-    # raw_items 길이와 df 길이가 다를 수 있으므로 맞춰줌
-    if len(branded_flags) == len(df):
-        df["is_branded"] = branded_flags
-    else:
-        df["is_branded"] = False
+    df["is_branded"] = branded_flags if len(branded_flags) == len(df) else False
 
-    # coauthorProducers 계정명만 추출해서 저장
     coauthor_names = []
     for item in raw_items:
         coauthors = item.get("coauthorProducers", [])
@@ -97,11 +95,7 @@ def normalize(df: pd.DataFrame, raw_items: list) -> pd.DataFrame:
             coauthor_names.append(", ".join(names))
         else:
             coauthor_names.append("")
-
-    if len(coauthor_names) == len(df):
-        df["coauthor_accounts"] = coauthor_names
-    else:
-        df["coauthor_accounts"] = ""
+    df["coauthor_accounts"] = coauthor_names if len(coauthor_names) == len(df) else ""
 
     return df
 
@@ -130,25 +124,43 @@ def append_and_dedup(new_df: pd.DataFrame) -> pd.DataFrame:
     return combined
 
 
+def collect(keyword: str, keyword_type: str, results_type: str, client) -> list:
+    """단일 키워드 수집"""
+    icon = "🏷️ " if keyword_type == "브랜드" else "📂"
+    print(f"{icon} [{keyword_type}] #{keyword} [{results_type}] 수집 중...")
+    run = client.actor(ACTOR_ID).call(run_input={
+        "hashtags":      [keyword],
+        "resultsLimit":  25,
+        "resultsType":   results_type,
+        "keywordSearch": False,
+    })
+    results = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+    for r in results:
+        r["search_keyword"] = keyword
+        r["keyword_type"]   = keyword_type
+    print(f"   → {len(results)}건")
+    return results
+
+
 def fetch_data():
     try:
-        client = ApifyClient(APIFY_TOKEN)
+        client      = ApifyClient(APIFY_TOKEN)
         all_results = []
 
+        print(f"🚀 수집 모드: {COLLECT_MODE.upper()}")
+        print(f"   브랜드 키워드:   {BRAND_KEYWORDS}")
+        if COLLECT_MODE == "all":
+            print(f"   카테고리 키워드: {CATEGORY_KEYWORDS}")
+
         for results_type in ("posts", "reels"):
-            for keyword in KEYWORDS:
-                print(f"🔍 #{keyword} [{results_type}] 수집 중...")
-                run = client.actor(ACTOR_ID).call(run_input={
-                    "hashtags":     [keyword],
-                    "resultsLimit": 25,
-                    "resultsType":  results_type,
-                    "keywordSearch": False,
-                })
-                results = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-                for r in results:
-                    r["search_keyword"] = keyword
-                all_results.extend(results)
-                print(f"   → {len(results)}건")
+            # 브랜드 키워드 — 항상 수집
+            for keyword in BRAND_KEYWORDS:
+                all_results.extend(collect(keyword, "브랜드", results_type, client))
+
+            # 카테고리 키워드 — 월요일(all 모드)만 수집
+            if COLLECT_MODE == "all":
+                for keyword in CATEGORY_KEYWORDS:
+                    all_results.extend(collect(keyword, "카테고리", results_type, client))
 
         if not all_results:
             print("⚠️ 수집된 데이터가 없습니다.")
@@ -157,13 +169,18 @@ def fetch_data():
         df = pd.DataFrame(all_results)
         df = normalize(df, all_results)
 
-        t = df["content_type"].value_counts()
-        branded_count = df["is_branded"].sum() if "is_branded" in df.columns else 0
+        t  = df["content_type"].value_counts()
+        kt = df["keyword_type"].value_counts() if "keyword_type" in df.columns else {}
+        branded_count = (df["is_branded"] == True).sum()
+
         print(f"\n✅ 수집 완료: {len(df)}건")
-        print(f"   릴스:          {t.get('reel', 0)}건")
-        print(f"   피드:          {t.get('feed', 0)}건")
-        print(f"   한국 콘텐츠:   {df['is_korean'].sum()}건")
-        print(f"   브랜디드 광고: {branded_count}건")
+        print(f"   브랜드 키워드:   {kt.get('브랜드', 0)}건")
+        if COLLECT_MODE == "all":
+            print(f"   카테고리 키워드: {kt.get('카테고리', 0)}건")
+        print(f"   릴스:            {t.get('reel', 0)}건")
+        print(f"   피드:            {t.get('feed', 0)}건")
+        print(f"   한국 콘텐츠:     {df['is_korean'].sum()}건")
+        print(f"   브랜디드 광고:   {branded_count}건")
 
         final = append_and_dedup(df)
         final.to_csv(OUTPUT_PATH, index=False, encoding="utf-8-sig")

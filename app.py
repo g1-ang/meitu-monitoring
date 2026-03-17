@@ -122,7 +122,7 @@ def render_keywords(df):
 def render_top5_cards(sub_df, metric_col):
     top = sub_df.nlargest(5, metric_col).reset_index(drop=True)
     if top.empty:
-        st.info("해당 기간 데이터가 없습니다.")
+        st.info("이번 주 데이터가 없습니다. 다음 수집 후 확인해주세요.")
         return
 
     type_colors = {"릴스": "#E1306C", "피드": "#405DE6", "피드(동영상)": "#833AB4"}
@@ -219,9 +219,6 @@ st.markdown(
 display_df  = this_week if not this_week.empty else filtered_df
 brand_df    = display_df[display_df["keyword_type"] == "브랜드"]
 category_df = display_df[display_df["keyword_type"] == "카테고리"]
-
-if category_df.empty:
-    category_df = filtered_df[filtered_df["keyword_type"] == "카테고리"]
 
 render_kpi_bar(display_df, last_week)
 st.divider()

@@ -3,7 +3,11 @@ import streamlit as st
 import plotly.express as px
 from utils import load_and_process, get_weekly_df, get_week_range, extract_keywords, fmt, TYPE_COLOR, TYPE_LABEL
 
-st.set_page_config(page_title="Meitu 모니터링", page_icon="📊", layout="wide")
+st.set_page_config(
+    page_title="요약 페이지",
+    page_icon="📊",
+    layout="wide"
+)
 
 COUNTRY_ORDER = ["🇰🇷 한국", "🇯🇵 일본", "🇨🇳 중국/대만", "🇹🇭 태국", "🌐 영어권", "🇪🇺 유럽", "🌏 기타"]
 
@@ -14,17 +18,49 @@ def load_data():
 
 
 def top_nav(current: str):
+    st.markdown("""
+    <style>
+    div[data-testid="stHorizontalBlock"] > div:first-child button,
+    div[data-testid="stHorizontalBlock"] > div:nth-child(2) button {
+        width: 100% !important;
+    }
+    .nav-active {
+        display: inline-block;
+        width: 100%;
+        text-align: center;
+        background: #E1306C;
+        color: white !important;
+        padding: 6px 0;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+    }
+    .nav-inactive {
+        display: inline-block;
+        width: 100%;
+        text-align: center;
+        background: #F0F0F0;
+        color: #888 !important;
+        padding: 6px 0;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     col1, col2, col3 = st.columns([1, 1, 8])
     with col1:
         if current == "summary":
-            st.markdown('<div style="background:#E1306C;color:white;text-align:center;padding:6px 0;border-radius:20px;font-size:14px;font-weight:500;">📊 요약</div>', unsafe_allow_html=True)
+            st.markdown('<span class="nav-active">📊 요약</span>', unsafe_allow_html=True)
         else:
             st.page_link("app.py", label="📊 요약")
     with col2:
         if current == "details":
-            st.markdown('<div style="background:#E1306C;color:white;text-align:center;padding:6px 0;border-radius:20px;font-size:14px;font-weight:500;">🔍 세부</div>', unsafe_allow_html=True)
+            st.markdown('<span class="nav-active">🔍 세부</span>', unsafe_allow_html=True)
         else:
             st.page_link("pages/details.py", label="🔍 세부")
+    st.markdown("<div style='margin-bottom:8px;'></div>", unsafe_allow_html=True)
 
 
 def render_kpi_bar(this_week, last_week):
@@ -171,7 +207,6 @@ if df["last_updated"].notna().any():
         f"| 누적: **{len(df):,}건**"
     )
 
-# 국가 필터 — 순서 고정 + 중복 선택
 available_countries = [c for c in COUNTRY_ORDER if c in df["country"].unique()]
 sel_countries = st.multiselect(
     "🌍 국가 필터 (복수 선택 가능)",

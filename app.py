@@ -5,10 +5,26 @@ from utils import load_and_process, get_weekly_df, get_week_range, extract_keywo
 
 st.set_page_config(page_title="Meitu 모니터링", page_icon="📊", layout="wide")
 
+COUNTRY_ORDER = ["🇰🇷 한국", "🇯🇵 일본", "🇨🇳 중국/대만", "🇹🇭 태국", "🌐 영어권", "🇪🇺 유럽", "🌏 기타"]
+
 
 @st.cache_data(ttl=300)
 def load_data():
     return load_and_process("data/latest_monitoring.csv")
+
+
+def top_nav(current: str):
+    col1, col2, col3 = st.columns([1, 1, 8])
+    with col1:
+        if current == "summary":
+            st.markdown('<div style="background:#E1306C;color:white;text-align:center;padding:6px 0;border-radius:20px;font-size:14px;font-weight:500;">📊 요약</div>', unsafe_allow_html=True)
+        else:
+            st.page_link("app.py", label="📊 요약")
+    with col2:
+        if current == "details":
+            st.markdown('<div style="background:#E1306C;color:white;text-align:center;padding:6px 0;border-radius:20px;font-size:14px;font-weight:500;">🔍 세부</div>', unsafe_allow_html=True)
+        else:
+            st.page_link("pages/details.py", label="🔍 세부")
 
 
 def render_kpi_bar(this_week, last_week):
@@ -70,7 +86,6 @@ def render_charts(df):
 
 
 def render_keywords(df):
-    """캡션 키워드 빈도 TOP 15 바차트"""
     st.subheader("🔤 캡션 키워드 TOP 15")
     st.caption("수집 키워드(meitu, 뷰티캠 등) 및 의미없는 태그 자동 제외 — 경쟁사 마케팅 주제 파악용")
 
@@ -79,24 +94,13 @@ def render_keywords(df):
         st.info("키워드 데이터가 없습니다.")
         return
 
-    fig = px.bar(
-        kw_df,
-        x="언급수",
-        y="키워드",
-        orientation="h",
-        color="언급수",
-        color_continuous_scale=["#E8F4FD", "#E1306C"],
-        labels={"언급수": "언급 횟수", "키워드": ""},
-        text="언급수",
-    )
+    fig = px.bar(kw_df, x="언급수", y="키워드", orientation="h",
+                 color="언급수", color_continuous_scale=["#E8F4FD", "#E1306C"],
+                 labels={"언급수": "언급 횟수", "키워드": ""}, text="언급수")
     fig.update_traces(textposition="outside")
-    fig.update_layout(
-        showlegend=False,
-        coloraxis_showscale=False,
-        margin=dict(t=10, b=10, l=10, r=60),
-        height=420,
-        yaxis=dict(autorange="reversed"),
-    )
+    fig.update_layout(showlegend=False, coloraxis_showscale=False,
+                      margin=dict(t=10, b=10, l=10, r=60),
+                      height=420, yaxis=dict(autorange="reversed"))
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -153,53 +157,50 @@ def render_top5(df):
         top5_cards(df[df["content_type"].isin(["feed", "video_feed"])], "likesCount")
 
 
-def main():
-    st.markdown("## 📊 Meitu 모니터링 — 요약")
+# ── 메인 ──────────────────────────────────────────────────────────────────────
+df = load_data()
 
-    try:
-        df = load_data()
-    except FileNotFoundError:
-        st.warning("데이터 파일이 없습니다. GitHub Actions를 먼저 실행해주세요.", icon="⚠️")
-        return
+top_nav("summary")
 
-    if df["last_updated"].notna().any():
-        last_kst = df["last_updated"].max() + pd.Timedelta(hours=9)
-        st.caption(
-            f"마지막 수집: **{last_kst.strftime('%Y-%m-%d %H:%M')} KST** "
-            f"| 누적: **{len(df):,}건**"
-        )
+st.markdown("## 📊 Meitu 모니터링 — 요약")
 
-    # 국가 필터
-    countries   = ["전체"] + sorted(df["country"].unique())
-    sel_country = st.selectbox("🌍 국가 필터", countries, index=0)
-    filtered_df = df if sel_country == "전체" else df[df["country"] == sel_country]
-
-    st.divider()
-
-    # 주차 계산
-    this_start, this_end = get_week_range(weeks_ago=0)
-    last_start, last_end = get_week_range(weeks_ago=1)
-    this_week = get_weekly_df(filtered_df, weeks_ago=0)
-    last_week = get_weekly_df(filtered_df, weeks_ago=1)
-
-    st.markdown(
-        f"**이번 주** {this_start.strftime('%m/%d')} ~ {(this_end - pd.Timedelta(days=1)).strftime('%m/%d')}"
-        f" &nbsp;vs&nbsp; "
-        f"**지난 주** {last_start.strftime('%m/%d')} ~ {(last_end - pd.Timedelta(days=1)).strftime('%m/%d')}"
+if df["last_updated"].notna().any():
+    last_kst = df["last_updated"].max() + pd.Timedelta(hours=9)
+    st.caption(
+        f"마지막 수집: **{last_kst.strftime('%Y-%m-%d %H:%M')} KST** "
+        f"| 누적: **{len(df):,}건**"
     )
 
-    display_df = this_week if not this_week.empty else filtered_df
-    render_kpi_bar(display_df, last_week)
+# 국가 필터 — 순서 고정 + 중복 선택
+available_countries = [c for c in COUNTRY_ORDER if c in df["country"].unique()]
+sel_countries = st.multiselect(
+    "🌍 국가 필터 (복수 선택 가능)",
+    options=available_countries,
+    default=available_countries,
+)
+filtered_df = df[df["country"].isin(sel_countries)] if sel_countries else df
 
-    st.divider()
-    render_charts(filtered_df)
+st.divider()
 
-    st.divider()
-    render_keywords(filtered_df)
+this_start, this_end = get_week_range(weeks_ago=0)
+last_start, last_end = get_week_range(weeks_ago=1)
+this_week = get_weekly_df(filtered_df, weeks_ago=0)
+last_week = get_weekly_df(filtered_df, weeks_ago=1)
 
-    st.divider()
-    render_top5(display_df if not this_week.empty else filtered_df)
+st.markdown(
+    f"**이번 주** {this_start.strftime('%m/%d')} ~ {(this_end - pd.Timedelta(days=1)).strftime('%m/%d')}"
+    f" &nbsp;vs&nbsp; "
+    f"**지난 주** {last_start.strftime('%m/%d')} ~ {(last_end - pd.Timedelta(days=1)).strftime('%m/%d')}"
+)
 
+display_df = this_week if not this_week.empty else filtered_df
+render_kpi_bar(display_df, last_week)
 
-if __name__ == "__main__":
-    main()
+st.divider()
+render_charts(filtered_df)
+
+st.divider()
+render_keywords(filtered_df)
+
+st.divider()
+render_top5(display_df if not this_week.empty else filtered_df)

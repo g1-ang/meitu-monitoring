@@ -3,61 +3,40 @@ import streamlit as st
 import plotly.express as px
 from utils import load_and_process, get_weekly_df, get_week_range, extract_keywords, fmt, TYPE_COLOR, TYPE_LABEL
 
-st.set_page_config(
-    page_title="요약 페이지",
-    page_icon="📊",
-    layout="wide"
-)
+st.set_page_config(page_title="요약 페이지", page_icon="📊", layout="wide")
 
-COUNTRY_ORDER = ["🇰🇷 한국", "🇯🇵 일본", "🇨🇳 중국/대만", "🇹🇭 태국", "🌐 영어권", "🇪🇺 유럽", "🌏 기타"]
+COUNTRY_ORDER  = ["🇰🇷 한국", "🇯🇵 일본", "🇨🇳 중국/대만", "🇹🇭 태국", "🌐 영어권", "🇪🇺 유럽", "🌏 기타"]
+BRAND_KEYWORDS = ["meitu", "메이투", "뷰티캠", "beautycam"]
 
 
 @st.cache_data(ttl=300)
 def load_data():
-    return load_and_process("data/latest_monitoring.csv")
+    df = load_and_process("data/latest_monitoring.csv")
+
+    if "keyword_type" not in df.columns:
+        df["keyword_type"] = df["search_keyword"].apply(
+            lambda x: "브랜드" if str(x).lower() in BRAND_KEYWORDS else "카테고리"
+        ) if "search_keyword" in df.columns else "브랜드"
+    else:
+        df["keyword_type"] = df.apply(
+            lambda row: row["keyword_type"]
+            if str(row.get("keyword_type", "")) in ("브랜드", "카테고리")
+            else ("브랜드" if str(row.get("search_keyword", "")).lower() in BRAND_KEYWORDS else "카테고리"),
+            axis=1
+        )
+    return df
 
 
-def top_nav(current: str):
-    st.markdown("""
-    <style>
-    div[data-testid="stHorizontalBlock"] > div:first-child button,
-    div[data-testid="stHorizontalBlock"] > div:nth-child(2) button {
-        width: 100% !important;
-    }
-    .nav-active {
-        display: inline-block;
-        width: 100%;
-        text-align: center;
-        background: #E1306C;
-        color: white !important;
-        padding: 6px 0;
-        border-radius: 8px;
-        font-size: 14px;
-        font-weight: 500;
-    }
-    .nav-inactive {
-        display: inline-block;
-        width: 100%;
-        text-align: center;
-        background: #F0F0F0;
-        color: #888 !important;
-        padding: 6px 0;
-        border-radius: 8px;
-        font-size: 14px;
-        font-weight: 500;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
+def top_nav(current):
     col1, col2, col3 = st.columns([1, 1, 8])
     with col1:
         if current == "summary":
-            st.markdown('<span class="nav-active">📊 요약</span>', unsafe_allow_html=True)
+            st.markdown('<span style="display:block;text-align:center;background:#E1306C;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">📊 요약</span>', unsafe_allow_html=True)
         else:
             st.page_link("app.py", label="📊 요약")
     with col2:
         if current == "details":
-            st.markdown('<span class="nav-active">🔍 세부</span>', unsafe_allow_html=True)
+            st.markdown('<span style="display:block;text-align:center;background:#E1306C;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">🔍 세부</span>', unsafe_allow_html=True)
         else:
             st.page_link("pages/details.py", label="🔍 세부")
     st.markdown("<div style='margin-bottom:8px;'></div>", unsafe_allow_html=True)
@@ -140,57 +119,66 @@ def render_keywords(df):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def render_top5(df):
-    st.subheader("🏆 이번 주 TOP 5")
-    st.caption("릴스: 조회수 기준 / 피드: 좋아요 기준")
+def render_top5_cards(sub_df, metric_col):
+    top = sub_df.nlargest(5, metric_col).reset_index(drop=True)
+    if top.empty:
+        st.info("해당 기간 데이터가 없습니다.")
+        return
 
-    tab_reel, tab_feed = st.tabs(["🎬 릴스 TOP 5", "🖼️ 피드 TOP 5"])
+    type_colors = {"릴스": "#E1306C", "피드": "#405DE6", "피드(동영상)": "#833AB4"}
+    cols = st.columns(5)
 
-    def top5_cards(sub_df, metric_col):
-        top = sub_df.nlargest(5, metric_col).reset_index(drop=True)
-        if top.empty:
-            st.info("해당 기간 데이터가 없습니다.")
-            return
-
-        type_colors = {"릴스": "#E1306C", "피드": "#405DE6", "피드(동영상)": "#833AB4"}
-        cols = st.columns(5)
-
-        for i, col in enumerate(cols):
-            if i >= len(top):
-                break
-            row = top.iloc[i]
-            with col:
-                thumb = str(row.get("displayUrl", ""))
-                if thumb and thumb not in ("nan", ""):
-                    try:
-                        st.image(thumb, use_container_width=True)
-                    except:
-                        st.markdown("<div style='background:#f0f0f0;height:100px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:20px;'>🖼️</div>", unsafe_allow_html=True)
-                else:
+    for i, col in enumerate(cols):
+        if i >= len(top):
+            break
+        row = top.iloc[i]
+        with col:
+            thumb = str(row.get("displayUrl", ""))
+            if thumb and thumb not in ("nan", ""):
+                try:
+                    st.image(thumb, use_container_width=True)
+                except:
                     st.markdown("<div style='background:#f0f0f0;height:100px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:20px;'>🖼️</div>", unsafe_allow_html=True)
+            else:
+                st.markdown("<div style='background:#f0f0f0;height:100px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:20px;'>🖼️</div>", unsafe_allow_html=True)
 
-                t_color  = type_colors.get(row["type_label"], "#888")
-                ad_color = "#FF6B00" if row["ad_type"] == "📢 광고" else "#2E7D32"
-                metric   = f"▶ {fmt(row['videoPlayCount'])}" if row["content_type"] == "reel" else f"❤ {fmt(row['likesCount'])}"
-                url      = str(row.get("url", ""))
-                link     = f'<a href="{url}" target="_blank" style="font-size:10px;color:#E1306C;text-decoration:none;">📎 보기</a>' if url.startswith("http") else ""
-                date_str = row["timestamp"].strftime("%m/%d") if pd.notna(row["timestamp"]) else "-"
+            t_color  = type_colors.get(row["type_label"], "#888")
+            ad_color = "#FF6B00" if row["ad_type"] == "📢 광고" else "#2E7D32"
+            metric   = f"▶ {fmt(row['videoPlayCount'])}" if row["content_type"] == "reel" else f"❤ {fmt(row['likesCount'])}"
+            url      = str(row.get("url", ""))
+            link     = f'<a href="{url}" target="_blank" style="font-size:10px;color:#E1306C;text-decoration:none;">📎 보기</a>' if url.startswith("http") else ""
+            date_str = row["timestamp"].strftime("%m/%d") if pd.notna(row["timestamp"]) else "-"
 
-                st.markdown(
-                    f'<div style="margin-top:5px;">'
-                    f'<span style="background:{t_color};color:white;font-size:9px;padding:1px 5px;border-radius:8px;">{row["type_label"]}</span>'
-                    f'<span style="background:{ad_color};color:white;font-size:9px;padding:1px 5px;border-radius:8px;margin-left:3px;">{row["ad_type"]}</span>'
-                    f'<div style="font-size:10px;color:#888;margin-top:3px;">{date_str} | {row.get("country","")}</div>'
-                    f'<div style="font-size:11px;font-weight:500;">@{str(row.get("ownerUsername","-"))}</div>'
-                    f'<div style="font-size:12px;">{metric}</div>'
-                    f'{link}'
-                    f'</div>',
-                    unsafe_allow_html=True)
+            st.markdown(
+                f'<div style="margin-top:5px;">'
+                f'<span style="background:{t_color};color:white;font-size:9px;padding:1px 5px;border-radius:8px;">{row["type_label"]}</span>'
+                f'<span style="background:{ad_color};color:white;font-size:9px;padding:1px 5px;border-radius:8px;margin-left:3px;">{row["ad_type"]}</span>'
+                f'<div style="font-size:10px;color:#888;margin-top:3px;">{date_str} | {row.get("country","")}</div>'
+                f'<div style="font-size:11px;font-weight:500;">@{str(row.get("ownerUsername","-"))}</div>'
+                f'<div style="font-size:12px;">{metric}</div>'
+                f'{link}'
+                f'</div>',
+                unsafe_allow_html=True)
+
+
+def render_top5(brand_df, category_df):
+    st.subheader("🏆 이번 주 TOP 5")
+    st.caption("릴스: 조회수 기준 / 피드: 좋아요 기준 / 카테고리: 인게이지먼트 기준")
+
+    tab_reel, tab_feed, tab_category = st.tabs([
+        "🎬 경쟁사 릴스 TOP 5",
+        "🖼️ 경쟁사 피드 TOP 5",
+        "📂 카테고리 TOP 5",
+    ])
 
     with tab_reel:
-        top5_cards(df[df["content_type"] == "reel"], "videoPlayCount")
+        render_top5_cards(brand_df[brand_df["content_type"] == "reel"], "videoPlayCount")
+
     with tab_feed:
-        top5_cards(df[df["content_type"].isin(["feed", "video_feed"])], "likesCount")
+        render_top5_cards(brand_df[brand_df["content_type"].isin(["feed", "video_feed"])], "likesCount")
+
+    with tab_category:
+        render_top5_cards(category_df, "engagement")
 
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
@@ -228,14 +216,17 @@ st.markdown(
     f"**지난 주** {last_start.strftime('%m/%d')} ~ {(last_end - pd.Timedelta(days=1)).strftime('%m/%d')}"
 )
 
-display_df = this_week if not this_week.empty else filtered_df
-render_kpi_bar(display_df, last_week)
+display_df  = this_week if not this_week.empty else filtered_df
+brand_df    = display_df[display_df["keyword_type"] == "브랜드"]
+category_df = display_df[display_df["keyword_type"] == "카테고리"]
 
+if category_df.empty:
+    category_df = filtered_df[filtered_df["keyword_type"] == "카테고리"]
+
+render_kpi_bar(display_df, last_week)
 st.divider()
 render_charts(filtered_df)
-
 st.divider()
 render_keywords(filtered_df)
-
 st.divider()
-render_top5(display_df if not this_week.empty else filtered_df)
+render_top5(brand_df, category_df)

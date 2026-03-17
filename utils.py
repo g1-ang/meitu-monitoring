@@ -1,6 +1,7 @@
 import re
 import pandas as pd
 from datetime import datetime, timedelta, timezone
+from collections import Counter
 
 TYPE_COLOR = {
     "reel":       "#E1306C",
@@ -16,8 +17,6 @@ AD_KEYWORDS = [
     "광고", "유료광고", "유료_광고", "ad", "sponsored", "collaboration",
     "콜라보", "협찬", "제공", "paid", "promotion"
 ]
-
-# 불용어 (캡션 키워드 분석 시 제외)
 STOPWORDS = {
     "meitu", "메이투", "뷰티캠", "beautycam", "beauty", "cam",
     "fyp", "foryou", "foryoupage", "viral", "reels", "reel",
@@ -26,7 +25,7 @@ STOPWORDS = {
     "the", "and", "for", "you", "this", "that", "with",
     "a", "is", "in", "of", "to", "it", "me", "my", "i",
     "좋아요", "팔로우", "댓글", "공유", "구독", "인스타", "인스타그램",
-    "shorts", "tiktok", "youtube",
+    "tiktok", "youtube",
 }
 
 
@@ -73,11 +72,6 @@ def fmt(n) -> str:
     return str(n)
 
 
-@staticmethod
-def load_data() -> pd.DataFrame:
-    pass
-
-
 def load_and_process(path: str = "data/latest_monitoring.csv") -> pd.DataFrame:
     df = pd.read_csv(path, dtype=str)
 
@@ -99,45 +93,48 @@ def load_and_process(path: str = "data/latest_monitoring.csv") -> pd.DataFrame:
             .str.strip()
         )
 
-    df["country"]    = df.get("caption", "").apply(detect_country)
-    df["ad_type"]    = df.get("caption", "").apply(detect_ad)
-    df["is_korean"]  = df["country"] == "🇰🇷 한국"
+    df["country"]   = df.get("caption", "").apply(detect_country)
+    df["ad_type"]   = df.get("caption", "").apply(detect_ad)
+    df["is_korean"] = df["country"] == "🇰🇷 한국"
 
     return df
 
 
+def get_week_range(weeks_ago: int = 0):
+    """월요일 기준 주차 계산"""
+    now          = datetime.now(timezone.utc)
+    this_monday  = now - timedelta(
+        days=now.weekday(),
+        hours=now.hour, minutes=now.minute,
+        seconds=now.second, microseconds=now.microsecond
+    )
+    start = this_monday - timedelta(weeks=weeks_ago)
+    end   = start + timedelta(weeks=1)
+    return start, end
+
+
 def get_weekly_df(df: pd.DataFrame, weeks_ago: int = 0) -> pd.DataFrame:
-    """weeks_ago=0: 이번 주, weeks_ago=1: 지난 주"""
-    now   = datetime.now(timezone.utc)
-    end   = now - timedelta(weeks=weeks_ago)
-    start = end - timedelta(weeks=1)
+    start, end = get_week_range(weeks_ago)
     return df[
         (df["timestamp"] >= start) &
         (df["timestamp"] < end)
-    ]
+    ].copy()
 
 
-def extract_keywords(df: pd.DataFrame, top_n: int = 20) -> pd.DataFrame:
-    """캡션에서 자주 등장하는 키워드 추출 (해시태그 포함)"""
-    from collections import Counter
+def extract_keywords(df: pd.DataFrame, top_n: int = 15) -> pd.DataFrame:
+    """캡션에서 자주 등장하는 키워드 추출"""
     counter = Counter()
-
     for caption in df["caption"].dropna():
-        # 해시태그 추출
-        tags = re.findall(r'#(\w+)', str(caption).lower())
-        # 일반 단어 추출 (3글자 이상)
+        tags  = re.findall(r'#(\w+)', str(caption).lower())
         words = re.findall(r'[가-힣a-zA-Z]{2,}', str(caption).lower())
-        all_tokens = tags + words
-        for token in all_tokens:
+        for token in tags + words:
             if token not in STOPWORDS and len(token) >= 2:
                 counter[token] += 1
-
-    result = pd.DataFrame(counter.most_common(top_n), columns=["키워드", "언급수"])
-    return result
+    return pd.DataFrame(counter.most_common(top_n), columns=["키워드", "언급수"])
 
 
 def render_card_grid(sub_df: pd.DataFrame, fmt_fn) -> str:
-    """HTML 카드 그리드 생성 — 모바일 2열 / PC 4열"""
+    """HTML 카드 그리드 — 모바일 2열 / PC 4열"""
     if sub_df.empty:
         return "<p style='color:#888;font-size:13px;'>해당 데이터가 없습니다.</p>"
 

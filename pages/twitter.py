@@ -1,3 +1,5 @@
+import re
+import ast
 import pandas as pd
 import streamlit as st
 from datetime import datetime, timedelta, timezone
@@ -40,104 +42,115 @@ def top_nav():
 
 
 def render_kpi(df):
-    """KPI — 메이투 건수 / 뷰티캠 건수 / 평균 지표"""
-    meitu_df   = df[df["search_keyword"].isin(["meitu", "메이투"])]
-    beautycam_df = df[df["search_keyword"] == "뷰티캠"]
-
-    total      = len(df)
-    meitu_cnt  = len(meitu_df)
-    beauty_cnt = len(beautycam_df)
+    meitu_cnt  = len(df[df["search_keyword"].isin(["meitu", "메이투"])])
+    beauty_cnt = len(df[df["search_keyword"] == "뷰티캠"])
     avg_like   = df["like_count"].mean()
     avg_rt     = df["retweet_count"].mean()
     avg_view   = df["view_count"].mean()
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("🐦 전체 트윗",        fmt(total))
-    c2.metric("📌 meitu + 메이투",   fmt(meitu_cnt))
-    c3.metric("📌 뷰티캠",           fmt(beauty_cnt))
-    c4.metric("❤️ 평균 좋아요",      f"{avg_like:.1f}")
-    c5.metric("👁️ 평균 조회수",      fmt(avg_view))
+    c1.metric("🐦 전체 트윗",      fmt(len(df)))
+    c2.metric("📌 meitu + 메이투", fmt(meitu_cnt))
+    c3.metric("📌 뷰티캠",         fmt(beauty_cnt))
+    c4.metric("❤️ 평균 좋아요",    f"{avg_like:.1f}")
+    c5.metric("👁️ 평균 조회수",    fmt(avg_view))
 
 
-def render_tweet_cards(df):
-    if df.empty:
+def get_first_image(row) -> str:
+    """트윗 이미지 URL 추출"""
+    for field in ("media_url", "images"):
+        val = str(row.get(field, ""))
+        if val and val not in ("nan", "[]", ""):
+            if val.startswith("http"):
+                return val
+            try:
+                lst = ast.literal_eval(val)
+                if lst and isinstance(lst, list):
+                    return lst[0]
+            except:
+                pass
+    return ""
+
+
+def render_tweet_cards(sub_df):
+    if sub_df.empty:
         st.info("해당 데이터가 없습니다.")
         return
 
-    top = df.nlargest(50, "engagement").reset_index(drop=True)
+    top = sub_df.nlargest(50, "engagement").reset_index(drop=True)
 
-    cols_per_row = 4
-    for i in range(0, len(top), cols_per_row):
-        cols = st.columns(cols_per_row)
-        for j, col in enumerate(cols):
-            idx = i + j
-            if idx >= len(top):
-                break
-            row = top.iloc[idx]
+    cards_html = """
+    <style>
+    .tw-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:8px; }
+    @media(max-width:768px){ .tw-grid{ grid-template-columns:repeat(2,1fr); gap:8px; } }
+    .tw-card {
+        background: var(--background-color, #fff);
+        border: 0.5px solid rgba(128,128,128,0.2);
+        border-radius: 12px;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+    .tw-card img {
+        width: 100%;
+        aspect-ratio: 16/9;
+        object-fit: cover;
+        border-radius: 8px;
+    }
+    .tw-kw {
+        display: inline-block;
+        background: #E8F5FE;
+        color: #1D9BF0;
+        font-size: 9px;
+        font-weight: 500;
+        padding: 1px 7px;
+        border-radius: 10px;
+    }
+    .tw-text {
+        font-size: 11px;
+        line-height: 1.6;
+        color: var(--color-text-primary, #000);
+    }
+    .tw-handle { font-size: 10px; color: #888; }
+    .tw-date   { font-size: 10px; color: #aaa; }
+    .tw-stats  { display:flex; gap:10px; font-size:11px; color:#666; flex-wrap:wrap; }
+    .tw-link   { font-size: 10px; color: #1D9BF0; text-decoration: none; }
+    </style>
+    <div class="tw-grid">
+    """
 
-            with col:
-                date_str = row["created_at"].strftime("%Y-%m-%d %H:%M") if pd.notna(row["created_at"]) else "-"
-                url      = str(row.get("url", ""))
-                text     = str(row.get("text", ""))
-                handle   = str(row.get("author_handle", "-"))
-                keyword  = str(row.get("search_keyword", ""))
-                link     = f'<a href="{url}" target="_blank" style="font-size:10px;color:#1D9BF0;text-decoration:none;">🔗 원문 보기</a>' if url.startswith("http") else ""
+    for _, row in top.iterrows():
+        keyword  = str(row.get("search_keyword", ""))
+        text     = re.sub(r'https?://\S+', '', str(row.get("text", ""))).strip()
+        if len(text) > 120:
+            text = text[:120] + "..."
+        handle   = str(row.get("author_handle", "-"))
+        date_str = row["created_at"].strftime("%Y-%m-%d %H:%M") if pd.notna(row["created_at"]) else "-"
+        url      = str(row.get("url", ""))
+        link     = f'<a class="tw-link" href="{url}" target="_blank">🔗 원문 보기</a>' if url.startswith("http") else ""
+        img_url  = get_first_image(row)
+        img_html = f'<img src="{img_url}" onerror="this.style.display=\'none\'">' if img_url else ""
 
-                # 트윗 이미지 추출 (URL에서 pic.twitter.com 또는 t.co 이미지)
-                media_url = str(row.get("media_url", "")) if "media_url" in row else ""
-                images    = str(row.get("images", ""))    if "images" in row else ""
+        cards_html += f"""
+        <div class="tw-card">
+            {img_html}
+            <div><span class="tw-kw">#{keyword}</span></div>
+            <div class="tw-text">{text}</div>
+            <div class="tw-handle">@{handle}</div>
+            <div class="tw-date">{date_str}</div>
+            <div class="tw-stats">
+                <span>❤️ {fmt(row['like_count'])}</span>
+                <span>🔁 {fmt(row['retweet_count'])}</span>
+                <span>💬 {fmt(row['reply_count'])}</span>
+                <span>👁️ {fmt(row['view_count'])}</span>
+            </div>
+            {link}
+        </div>
+        """
 
-                # 텍스트에서 URL 제거 (깔끔하게)
-                import re
-                clean_text = re.sub(r'https?://\S+', '', text).strip()
-                if len(clean_text) > 120:
-                    clean_text = clean_text[:120] + "..."
-
-                # 이미지 표시
-                img_html = ""
-                if media_url and media_url not in ("nan", ""):
-                    img_html = f'<img src="{media_url}" style="width:100%;border-radius:8px;margin-bottom:6px;aspect-ratio:16/9;object-fit:cover;" onerror="this.style.display=\'none\'">'
-                elif images and images not in ("nan", "[]", ""):
-                    # images 컬럼에서 첫 번째 URL 추출
-                    import ast
-                    try:
-                        img_list = ast.literal_eval(images)
-                        if img_list:
-                            img_html = f'<img src="{img_list[0]}" style="width:100%;border-radius:8px;margin-bottom:6px;aspect-ratio:16/9;object-fit:cover;" onerror="this.style.display=\'none\'">'
-                    except:
-                        pass
-
-                st.markdown(
-                    f"""
-                    <div style="background:var(--background-color,#fff);
-                                border:0.5px solid rgba(128,128,128,0.2);
-                                border-radius:12px;padding:12px;margin-bottom:4px;">
-                        {img_html}
-                        <div style="display:flex;justify-content:space-between;
-                                    align-items:center;margin-bottom:6px;">
-                            <span style="background:#E8F5FE;color:#1D9BF0;font-size:9px;
-                                         font-weight:500;padding:1px 7px;border-radius:10px;">
-                                #{keyword}
-                            </span>
-                            <span style="font-size:10px;color:#888;">{date_str}</span>
-                        </div>
-                        <div style="font-size:11px;color:var(--color-text-primary,#000);
-                                    line-height:1.5;margin-bottom:8px;">{clean_text}</div>
-                        <div style="font-size:10px;color:#888;margin-bottom:6px;">
-                            @{handle}
-                        </div>
-                        <div style="display:flex;gap:10px;font-size:11px;
-                                    color:#666;margin-bottom:6px;">
-                            <span>❤️ {fmt(row['like_count'])}</span>
-                            <span>🔁 {fmt(row['retweet_count'])}</span>
-                            <span>💬 {fmt(row['reply_count'])}</span>
-                            <span>👁️ {fmt(row['view_count'])}</span>
-                        </div>
-                        {link}
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
+    cards_html += "</div>"
+    st.html(cards_html)
 
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
@@ -160,7 +173,7 @@ if df["last_updated"].notna().any():
 
 st.divider()
 
-# 필터 — 기간 + 키워드만
+# 필터
 col1, col2 = st.columns(2)
 
 with col1:
@@ -178,11 +191,7 @@ with col1:
         end_d   = df["created_at"].max().date() if df["created_at"].notna().any() else None
 
 with col2:
-    sel_keywords = st.multiselect(
-        "🔍 키워드",
-        options=KEYWORDS,
-        default=KEYWORDS
-    )
+    sel_keywords = st.multiselect("🔍 키워드", options=KEYWORDS, default=KEYWORDS)
 
 # 필터 적용
 filtered = df.copy()
@@ -197,11 +206,9 @@ if sel_keywords:
 st.caption(f"필터 결과: **{len(filtered):,}건**")
 st.divider()
 
-# KPI
 render_kpi(filtered)
 st.divider()
 
-# 트윗 목록
 st.subheader("📋 트윗 목록")
 st.caption("인게이지먼트(좋아요+리트윗+댓글) 기준 상위 50건 | 원문 보기 클릭 시 트위터로 이동")
 
@@ -213,9 +220,7 @@ tab_all, tab_meitu, tab_beautycam = st.tabs([
 
 with tab_all:
     render_tweet_cards(filtered)
-
 with tab_meitu:
     render_tweet_cards(filtered[filtered["search_keyword"].isin(["meitu", "메이투"])])
-
 with tab_beautycam:
     render_tweet_cards(filtered[filtered["search_keyword"] == "뷰티캠"])

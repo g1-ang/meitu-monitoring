@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 from datetime import datetime, timedelta, timezone
 
-st.set_page_config(page_title="트위터 모니터링", page_icon="🐦", layout="wide")
+st.set_page_config(page_title="Twitter (KR)", page_icon="🐦", layout="wide")
 
 KEYWORDS = ["meitu", "메이투", "뷰티캠"]
 
@@ -12,14 +12,11 @@ KEYWORDS = ["meitu", "메이투", "뷰티캠"]
 @st.cache_data(ttl=300)
 def load_data():
     df = pd.read_csv("data/latest_twitter.csv", dtype=str)
-
     for col in ("view_count", "like_count", "retweet_count", "reply_count"):
         df[col] = pd.to_numeric(df.get(col, 0), errors="coerce").fillna(0).astype(int)
-
     df["created_at"]   = pd.to_datetime(df.get("created_at", ""), errors="coerce", utc=True)
     df["last_updated"] = pd.to_datetime(df.get("last_updated", ""), errors="coerce")
     df["engagement"]   = df["like_count"] + df["retweet_count"] + df["reply_count"]
-
     return df
 
 
@@ -44,20 +41,15 @@ def top_nav():
 def render_kpi(df):
     meitu_cnt  = len(df[df["search_keyword"].isin(["meitu", "메이투"])])
     beauty_cnt = len(df[df["search_keyword"] == "뷰티캠"])
-    avg_like   = df["like_count"].mean()
-    avg_rt     = df["retweet_count"].mean()
-    avg_view   = df["view_count"].mean()
-
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("🐦 전체 트윗",      fmt(len(df)))
     c2.metric("📌 meitu + 메이투", fmt(meitu_cnt))
     c3.metric("📌 뷰티캠",         fmt(beauty_cnt))
-    c4.metric("❤️ 평균 좋아요",    f"{avg_like:.1f}")
-    c5.metric("👁️ 평균 조회수",    fmt(avg_view))
+    c4.metric("❤️ 평균 좋아요",    f"{df['like_count'].mean():.1f}")
+    c5.metric("👁️ 평균 조회수",    fmt(df['view_count'].mean()))
 
 
 def get_first_image(row) -> str:
-    """트윗 이미지 URL 추출"""
     for field in ("media_url", "images"):
         val = str(row.get(field, ""))
         if val and val not in ("nan", "[]", ""):
@@ -83,39 +75,14 @@ def render_tweet_cards(sub_df):
     <style>
     .tw-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:8px; }
     @media(max-width:768px){ .tw-grid{ grid-template-columns:repeat(2,1fr); gap:8px; } }
-    .tw-card {
-        background: var(--background-color, #fff);
-        border: 0.5px solid rgba(128,128,128,0.2);
-        border-radius: 12px;
-        padding: 12px;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-    }
-    .tw-card img {
-        width: 100%;
-        aspect-ratio: 16/9;
-        object-fit: cover;
-        border-radius: 8px;
-    }
-    .tw-kw {
-        display: inline-block;
-        background: #E8F5FE;
-        color: #1D9BF0;
-        font-size: 9px;
-        font-weight: 500;
-        padding: 1px 7px;
-        border-radius: 10px;
-    }
-    .tw-text {
-        font-size: 11px;
-        line-height: 1.6;
-        color: var(--color-text-primary, #000);
-    }
-    .tw-handle { font-size: 10px; color: #888; }
-    .tw-date   { font-size: 10px; color: #aaa; }
-    .tw-stats  { display:flex; gap:10px; font-size:11px; color:#666; flex-wrap:wrap; }
-    .tw-link   { font-size: 10px; color: #1D9BF0; text-decoration: none; }
+    .tw-card { background:var(--background-color,#fff); border:0.5px solid rgba(128,128,128,0.2); border-radius:12px; padding:12px; display:flex; flex-direction:column; gap:6px; }
+    .tw-card img { width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:8px; }
+    .tw-kw { display:inline-block; background:#E8F5FE; color:#1D9BF0; font-size:9px; font-weight:500; padding:1px 7px; border-radius:10px; }
+    .tw-text { font-size:11px; line-height:1.6; color:var(--color-text-primary,#000); }
+    .tw-handle { font-size:10px; color:#888; }
+    .tw-date { font-size:10px; color:#aaa; }
+    .tw-stats { display:flex; gap:10px; font-size:11px; color:#666; flex-wrap:wrap; }
+    .tw-link { font-size:10px; color:#1D9BF0; text-decoration:none; }
     </style>
     <div class="tw-grid">
     """
@@ -155,7 +122,6 @@ def render_tweet_cards(sub_df):
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
 top_nav()
-
 st.markdown("## 🐦 트위터 모니터링")
 
 try:
@@ -166,21 +132,14 @@ except FileNotFoundError:
 
 if df["last_updated"].notna().any():
     last_kst = df["last_updated"].max() + pd.Timedelta(hours=9)
-    st.caption(
-        f"마지막 수집: **{last_kst.strftime('%Y-%m-%d %H:%M')} KST** "
-        f"| 누적: **{len(df):,}건**"
-    )
+    st.caption(f"마지막 수집: **{last_kst.strftime('%Y-%m-%d %H:%M')} KST** | 누적: **{len(df):,}건**")
 
 st.divider()
 
-# 필터
 col1, col2 = st.columns(2)
-
 with col1:
     now      = datetime.now(timezone.utc)
-    period   = st.radio("📅 기간",
-                        ["최근 7일", "최근 1개월", "최근 3개월", "전체"],
-                        index=3, horizontal=True)
+    period   = st.radio("📅 기간", ["최근 7일", "최근 1개월", "최근 3개월", "전체"], index=3, horizontal=True)
     days_map = {"최근 7일": 7, "최근 1개월": 30, "최근 3개월": 90, "전체": None}
     days     = days_map[period]
     if days:
@@ -189,11 +148,9 @@ with col1:
     else:
         start_d = df["created_at"].min().date() if df["created_at"].notna().any() else None
         end_d   = df["created_at"].max().date() if df["created_at"].notna().any() else None
-
 with col2:
     sel_keywords = st.multiselect("🔍 키워드", options=KEYWORDS, default=KEYWORDS)
 
-# 필터 적용
 filtered = df.copy()
 if start_d and end_d:
     filtered = filtered[
@@ -212,12 +169,7 @@ st.divider()
 st.subheader("📋 트윗 목록")
 st.caption("인게이지먼트(좋아요+리트윗+댓글) 기준 상위 50건 | 원문 보기 클릭 시 트위터로 이동")
 
-tab_all, tab_meitu, tab_beautycam = st.tabs([
-    "전체",
-    "meitu / 메이투",
-    "뷰티캠",
-])
-
+tab_all, tab_meitu, tab_beautycam = st.tabs(["전체", "meitu / 메이투", "뷰티캠"])
 with tab_all:
     render_tweet_cards(filtered)
 with tab_meitu:

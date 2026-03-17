@@ -13,10 +13,17 @@ TYPE_LABEL = {
     "feed":       "피드",
     "video_feed": "피드(동영상)",
 }
+
+# 캡션 키워드 기반 광고 감지
 AD_KEYWORDS = [
-    "광고", "유료광고", "유료_광고", "ad", "sponsored", "collaboration",
-    "콜라보", "협찬", "제공", "paid", "promotion"
+    "광고", "유료광고", "유료_광고", "협찬", "제공", "콜라보",
+    "ad", "sponsored", "collaboration", "paid", "promotion",
+    "partnership", "파트너십", "collab", "pr",
 ]
+
+# 브랜디드 콘텐츠 감지 대상 계정
+BRANDED_ACCOUNTS = ["meitu.kr", "beautycam.kr", "meitu_korea", "beautycam_korea"]
+
 STOPWORDS = {
     "meitu", "메이투", "뷰티캠", "beautycam", "beauty", "cam",
     "fyp", "foryou", "foryoupage", "viral", "reels", "reel",
@@ -41,11 +48,29 @@ def detect_country(text: str) -> str:
     return "🌏 기타"
 
 
-def detect_ad(text: str) -> str:
-    t = str(text).lower()
+def detect_ad(row: pd.Series) -> str:
+    """
+    광고 감지 우선순위:
+    1. is_branded == True → 브랜디드 콘텐츠 (meitu.kr / beautycam.kr 협찬)
+    2. coauthor_accounts 에 대상 계정 포함
+    3. 캡션에 광고 키워드 포함
+    """
+    # 1) 브랜디드 콘텐츠 필드
+    is_branded = str(row.get("is_branded", "false")).lower()
+    if is_branded == "true":
+        return "📢 광고"
+
+    # 2) coauthor_accounts 필드
+    coauthors = str(row.get("coauthor_accounts", "")).lower()
+    if coauthors and any(acc in coauthors for acc in BRANDED_ACCOUNTS):
+        return "📢 광고"
+
+    # 3) 캡션 키워드
+    caption = str(row.get("caption", "")).lower()
     for kw in AD_KEYWORDS:
-        if f"#{kw.lower()}" in t or f" {kw.lower()} " in t or t.startswith(kw.lower()):
+        if f"#{kw.lower()}" in caption or f" {kw.lower()} " in caption or caption.startswith(kw.lower()):
             return "📢 광고"
+
     return "🌱 오가닉"
 
 
@@ -93,17 +118,18 @@ def load_and_process(path: str = "data/latest_monitoring.csv") -> pd.DataFrame:
             .str.strip()
         )
 
-    df["country"]   = df.get("caption", "").apply(detect_country)
-    df["ad_type"]   = df.get("caption", "").apply(detect_ad)
+    df["country"] = df.get("caption", "").apply(detect_country)
+
+    # 광고 감지 — 브랜디드 콘텐츠 + 캡션 키워드 통합
+    df["ad_type"]   = df.apply(detect_ad, axis=1)
     df["is_korean"] = df["country"] == "🇰🇷 한국"
 
     return df
 
 
 def get_week_range(weeks_ago: int = 0):
-    """월요일 기준 주차 계산"""
-    now          = datetime.now(timezone.utc)
-    this_monday  = now - timedelta(
+    now         = datetime.now(timezone.utc)
+    this_monday = now - timedelta(
         days=now.weekday(),
         hours=now.hour, minutes=now.minute,
         seconds=now.second, microseconds=now.microsecond
@@ -122,7 +148,6 @@ def get_weekly_df(df: pd.DataFrame, weeks_ago: int = 0) -> pd.DataFrame:
 
 
 def extract_keywords(df: pd.DataFrame, top_n: int = 15) -> pd.DataFrame:
-    """캡션에서 자주 등장하는 키워드 추출"""
     counter = Counter()
     for caption in df["caption"].dropna():
         tags  = re.findall(r'#(\w+)', str(caption).lower())
@@ -134,7 +159,6 @@ def extract_keywords(df: pd.DataFrame, top_n: int = 15) -> pd.DataFrame:
 
 
 def render_card_grid(sub_df: pd.DataFrame, fmt_fn) -> str:
-    """HTML 카드 그리드 — 모바일 2열 / PC 4열"""
     if sub_df.empty:
         return "<p style='color:#888;font-size:13px;'>해당 데이터가 없습니다.</p>"
 
@@ -155,6 +179,7 @@ def render_card_grid(sub_df: pd.DataFrame, fmt_fn) -> str:
     .ig-user { font-size:11px; font-weight:500; margin-bottom:3px; }
     .ig-stats { font-size:11px; margin-bottom:4px; }
     .ig-link { font-size:10px; color:#E1306C; text-decoration:none; }
+    .ig-branded { font-size:9px; color:#FF6B00; margin-bottom:3px; }
     </style>
     <div class="ig-grid">
     """
@@ -171,6 +196,12 @@ def render_card_grid(sub_df: pd.DataFrame, fmt_fn) -> str:
         url      = str(row.get("url", ""))
         link     = f'<a class="ig-link" href="{url}" target="_blank">📎 보기</a>' if url.startswith("http") else ""
 
+        # 브랜디드 콘텐츠 계정 표시
+        coauthors    = str(row.get("coauthor_accounts", ""))
+        branded_html = ""
+        if coauthors and coauthors not in ("nan", ""):
+            branded_html = f'<div class="ig-branded">🤝 {coauthors}</div>'
+
         thumb_html = (
             f'<img src="{thumb}" loading="lazy" onerror="this.parentNode.innerHTML=\'<div class=ig-placeholder>🖼️</div>\'">'
             if thumb and thumb not in ("nan", "")
@@ -185,6 +216,7 @@ def render_card_grid(sub_df: pd.DataFrame, fmt_fn) -> str:
                     <span class="ig-badge" style="background:{t_color};">{row["type_label"]}</span>
                     <span class="ig-badge" style="background:{ad_color};">{row["ad_type"]}</span>
                 </div>
+                {branded_html}
                 <div class="ig-meta">{date_str} | {country}</div>
                 <div class="ig-user">@{username}</div>
                 <div class="ig-stats">{metric} &nbsp; 💬 {comments}</div>

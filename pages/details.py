@@ -11,10 +11,28 @@ st.set_page_config(
 
 COUNTRY_ORDER = ["🇰🇷 한국", "🇯🇵 일본", "🇨🇳 중국/대만", "🇹🇭 태국", "🌐 영어권", "🇪🇺 유럽", "🌏 기타"]
 
+# 브랜드 키워드 목록 (keyword_type 없는 기존 데이터 분류용)
+BRAND_KEYWORDS = ["meitu", "메이투", "뷰티캠", "beautycam"]
+
 
 @st.cache_data(ttl=300)
 def load_data():
-    return load_and_process("data/latest_monitoring.csv")
+    df = load_and_process("data/latest_monitoring.csv")
+
+    # keyword_type 없는 기존 데이터 자동 분류
+    if "keyword_type" not in df.columns:
+        df["keyword_type"] = "브랜드"
+    else:
+        df["keyword_type"] = df["keyword_type"].fillna("브랜드")
+        # search_keyword 기준으로 재분류
+        def infer_type(row):
+            if str(row.get("keyword_type", "")) in ("브랜드", "카테고리"):
+                return row["keyword_type"]
+            kw = str(row.get("search_keyword", "")).lower()
+            return "브랜드" if kw in BRAND_KEYWORDS else "카테고리"
+        df["keyword_type"] = df.apply(infer_type, axis=1)
+
+    return df
 
 
 def top_nav(current: str):
@@ -30,6 +48,77 @@ def top_nav(current: str):
         else:
             st.page_link("pages/details.py", label="🔍 세부")
     st.markdown("<div style='margin-bottom:8px;'></div>", unsafe_allow_html=True)
+
+
+def apply_filters(df):
+    """필터 UI + 적용"""
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        available = [c for c in COUNTRY_ORDER if c in df["country"].unique()]
+        sel_countries = st.multiselect(
+            "🌍 국가", options=available, default=available
+        )
+
+    with col2:
+        now      = datetime.now(timezone.utc)
+        period   = st.radio("📅 기간",
+                            ["최근 7일", "최근 1개월", "최근 3개월", "전체"],
+                            index=3, horizontal=False)
+        days_map = {"최근 7일": 7, "최근 1개월": 30, "최근 3개월": 90, "전체": None}
+        days     = days_map[period]
+        if days:
+            start_d = (now - timedelta(days=days)).date()
+            end_d   = now.date()
+        else:
+            start_d = df["timestamp"].min().date() if df["timestamp"].notna().any() else None
+            end_d   = df["timestamp"].max().date() if df["timestamp"].notna().any() else None
+
+    with col3:
+        sel_content = st.radio("📹 콘텐츠 형태",
+                               ["전체", "🎬 릴스", "🖼️ 피드"], index=0)
+
+    with col4:
+        sel_ad = st.radio("📣 광고 여부",
+                          ["전체", "📢 광고", "🌱 오가닉"], index=0)
+
+    # 필터 적용
+    filtered = df.copy()
+    if sel_countries:
+        filtered = filtered[filtered["country"].isin(sel_countries)]
+    if start_d and end_d:
+        filtered = filtered[
+            (filtered["timestamp"].dt.date >= start_d) &
+            (filtered["timestamp"].dt.date <= end_d)
+        ]
+    if sel_content == "🎬 릴스":
+        filtered = filtered[filtered["content_type"] == "reel"]
+    elif sel_content == "🖼️ 피드":
+        filtered = filtered[filtered["content_type"].isin(["feed", "video_feed"])]
+    if sel_ad != "전체":
+        filtered = filtered[filtered["ad_type"] == sel_ad]
+
+    st.caption(f"필터 결과: **{len(filtered):,}건**")
+    return filtered
+
+
+def show_tab_cards(df, keyword_type: str):
+    """브랜드 or 카테고리 탭 내 카드 표시"""
+    sub = df[df["keyword_type"] == keyword_type]
+    if sub.empty:
+        st.info(f"{keyword_type} 키워드 데이터가 없습니다. 다음 수집 후 확인해주세요.")
+        return
+
+    # 키워드별 소탭
+    keywords = sorted(sub["search_keyword"].dropna().unique())
+    kw_tabs  = st.tabs(["전체"] + [f"#{k}" for k in keywords])
+
+    with kw_tabs[0]:
+        st.html(render_card_grid(sub, fmt))
+
+    for kw_tab, kw in zip(kw_tabs[1:], keywords):
+        with kw_tab:
+            st.html(render_card_grid(sub[sub["search_keyword"] == kw], fmt))
 
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
@@ -48,61 +137,37 @@ if df_all["last_updated"].notna().any():
 
 st.divider()
 
-col1, col2, col3, col4 = st.columns(4)
+# 필터
+filtered = apply_filters(df_all)
 
-with col1:
-    available_countries = [c for c in COUNTRY_ORDER if c in df_all["country"].unique()]
-    sel_countries = st.multiselect(
-        "🌍 국가 (복수 선택 가능)",
-        options=available_countries,
-        default=available_countries,
-    )
-
-with col2:
-    now      = datetime.now(timezone.utc)
-    period   = st.radio("📅 기간", ["최근 7일", "최근 1개월", "최근 3개월", "전체"],
-                        index=3, horizontal=False)
-    days_map = {"최근 7일": 7, "최근 1개월": 30, "최근 3개월": 90, "전체": None}
-    days     = days_map[period]
-    if days:
-        start_d = (now - timedelta(days=days)).date()
-        end_d   = now.date()
-    else:
-        start_d = df_all["timestamp"].min().date() if df_all["timestamp"].notna().any() else None
-        end_d   = df_all["timestamp"].max().date() if df_all["timestamp"].notna().any() else None
-
-with col3:
-    sel_content = st.radio("📹 콘텐츠 형태", ["전체", "🎬 릴스", "🖼️ 피드"], index=0)
-
-with col4:
-    sel_ad = st.radio("📣 광고 여부", ["전체", "📢 광고", "🌱 오가닉"], index=0)
-
-filtered = df_all.copy()
-
-if sel_countries:
-    filtered = filtered[filtered["country"].isin(sel_countries)]
-
-if start_d and end_d:
-    filtered = filtered[
-        (filtered["timestamp"].dt.date >= start_d) &
-        (filtered["timestamp"].dt.date <= end_d)
-    ]
-
-if sel_content == "🎬 릴스":
-    filtered = filtered[filtered["content_type"] == "reel"]
-elif sel_content == "🖼️ 피드":
-    filtered = filtered[filtered["content_type"].isin(["feed", "video_feed"])]
-
-if sel_ad != "전체":
-    filtered = filtered[filtered["ad_type"] == sel_ad]
-
-st.caption(f"필터 결과: **{len(filtered):,}건**")
 st.divider()
 
+# 브랜드 / 카테고리 탭
 st.subheader("📋 게시물 목록")
 st.caption("인게이지먼트 기준 상위 50건 | 링크 클릭 시 인스타그램으로 이동")
 
-if filtered.empty:
-    st.info("필터 조건에 맞는 데이터가 없습니다.")
-else:
-    st.html(render_card_grid(filtered, fmt))
+tab_brand, tab_category = st.tabs(["🏷️ 브랜드 키워드", "📂 카테고리 키워드"])
+
+with tab_brand:
+    st.caption("meitu · 메이투 · 뷰티캠 · beautycam 해시태그 게시물")
+    show_tab_cards(filtered, "브랜드")
+
+with tab_category:
+    st.caption("보정 · 사진편집 · ai보정 해시태그 게시물")
+    show_tab_cards(filtered, "카테고리")
+```
+
+---
+
+이렇게 하면 세부 페이지가 이런 구조가 돼요.
+```
+🔍 세부 페이지
+├── 필터 (국가 / 기간 / 콘텐츠 형태 / 광고 여부)
+│
+├── 🏷️ 브랜드 키워드 탭
+│     전체 / #meitu / #메이투 / #뷰티캠 / #beautycam
+│     → 카드 그리드
+│
+└── 📂 카테고리 키워드 탭
+      전체 / #보정 / #사진편집 / #ai보정
+      → 카드 그리드

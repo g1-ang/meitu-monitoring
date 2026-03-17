@@ -3,7 +3,7 @@ import streamlit as st
 from datetime import datetime, timedelta, timezone
 from utils import load_and_process, fmt, render_card_grid
 
-st.set_page_config(page_title="세부 페이지", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="IG Details", page_icon="🔍", layout="wide")
 
 COUNTRY_ORDER  = ["🇰🇷 한국", "🇯🇵 일본", "🇨🇳 중국/대만", "🇹🇭 태국", "🌐 영어권", "🇪🇺 유럽", "🌏 기타"]
 BRAND_KEYWORDS = ["meitu", "메이투", "뷰티캠", "beautycam"]
@@ -12,7 +12,6 @@ BRAND_KEYWORDS = ["meitu", "메이투", "뷰티캠", "beautycam"]
 @st.cache_data(ttl=300)
 def load_data():
     df = load_and_process("data/latest_monitoring.csv")
-
     if "keyword_type" not in df.columns:
         df["keyword_type"] = df["search_keyword"].apply(
             lambda x: "브랜드" if str(x).lower() in BRAND_KEYWORDS else "카테고리"
@@ -24,7 +23,6 @@ def load_data():
             else ("브랜드" if str(row.get("search_keyword", "")).lower() in BRAND_KEYWORDS else "카테고리"),
             axis=1
         )
-
     return df
 
 
@@ -45,11 +43,9 @@ def top_nav(current):
 
 def apply_filters(df):
     col1, col2, col3, col4 = st.columns(4)
-
     with col1:
         available     = [c for c in COUNTRY_ORDER if c in df["country"].unique()]
         sel_countries = st.multiselect("🌍 국가", options=available, default=available)
-
     with col2:
         now      = datetime.now(timezone.utc)
         period   = st.radio("📅 기간", ["최근 7일", "최근 1개월", "최근 3개월", "전체"], index=3, horizontal=False)
@@ -61,10 +57,8 @@ def apply_filters(df):
         else:
             start_d = df["timestamp"].min().date() if df["timestamp"].notna().any() else None
             end_d   = df["timestamp"].max().date() if df["timestamp"].notna().any() else None
-
     with col3:
         sel_content = st.radio("📹 콘텐츠 형태", ["전체", "🎬 릴스", "🖼️ 피드"], index=0)
-
     with col4:
         sel_ad = st.radio("📣 광고 여부", ["전체", "📢 광고", "🌱 오가닉"], index=0)
 
@@ -92,14 +86,11 @@ def show_keyword_cards(df, keyword_type):
     if sub.empty:
         st.info(f"{keyword_type} 키워드 데이터가 없습니다. 다음 수집 후 확인해주세요.")
         return
-
-    keywords = sorted(sub["search_keyword"].dropna().unique()) if "search_keyword" in sub.columns else []
+    keywords   = sorted(sub["search_keyword"].dropna().unique()) if "search_keyword" in sub.columns else []
     tab_labels = ["전체"] + [f"#{k}" for k in keywords]
-    tabs = st.tabs(tab_labels)
-
+    tabs       = st.tabs(tab_labels)
     with tabs[0]:
         st.html(render_card_grid(sub, fmt))
-
     for tab, kw in zip(tabs[1:], keywords):
         with tab:
             st.html(render_card_grid(sub[sub["search_keyword"] == kw], fmt))
@@ -107,17 +98,12 @@ def show_keyword_cards(df, keyword_type):
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
 df_all = load_data()
-
 top_nav("details")
-
 st.markdown("## 🔍 Meitu 모니터링 — 세부")
 
 if df_all["last_updated"].notna().any():
     last_kst = df_all["last_updated"].max() + pd.Timedelta(hours=9)
-    st.caption(
-        f"마지막 수집: **{last_kst.strftime('%Y-%m-%d %H:%M')} KST** "
-        f"| 누적: **{len(df_all):,}건**"
-    )
+    st.caption(f"마지막 수집: **{last_kst.strftime('%Y-%m-%d %H:%M')} KST** | 누적: **{len(df_all):,}건**")
 
 st.divider()
 filtered = apply_filters(df_all)
@@ -127,11 +113,9 @@ st.subheader("📋 게시물 목록")
 st.caption("인게이지먼트 기준 상위 50건 | 링크 클릭 시 인스타그램으로 이동")
 
 tab_brand, tab_category = st.tabs(["🏷️ 브랜드 키워드", "📂 카테고리 키워드"])
-
 with tab_brand:
     st.caption("meitu · 메이투 · 뷰티캠 · beautycam 해시태그 게시물")
     show_keyword_cards(filtered, "브랜드")
-
 with tab_category:
     st.caption("보정 · 사진편집 · ai보정 해시태그 게시물")
     show_keyword_cards(filtered, "카테고리")

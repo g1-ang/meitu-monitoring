@@ -2,6 +2,7 @@ import re
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+from datetime import datetime, timedelta, timezone
 
 st.set_page_config(page_title="Meitu 모니터링", page_icon="📊", layout="wide")
 
@@ -114,12 +115,52 @@ def render_filters(df):
                 sel_kw = []
 
         with col3:
+            st.markdown("**게시 기간**")
+
+            # 빠른 선택 버튼
+            now = datetime.now(timezone.utc)
+            quick_options = {
+                "최근 7일":  (now - timedelta(days=7)).date(),
+                "최근 1개월": (now - timedelta(days=30)).date(),
+                "최근 3개월": (now - timedelta(days=90)).date(),
+                "전체":      None,
+            }
+
+            sel_quick = st.radio(
+                "빠른 선택",
+                options=list(quick_options.keys()),
+                index=3,  # 기본값: 전체
+                horizontal=True,
+                label_visibility="collapsed",
+                key="quick_date"
+            )
+
+            # 직접 날짜 입력 (전체 선택 시만 활성화)
             if df["timestamp"].notna().any():
                 min_d = df["timestamp"].min().date()
                 max_d = df["timestamp"].max().date()
-                d = st.date_input("게시 기간", (min_d, max_d), min_value=min_d, max_value=max_d)
+
+                if quick_options[sel_quick] is not None:
+                    # 빠른 선택 적용
+                    start_d = max(quick_options[sel_quick], min_d)
+                    st.date_input(
+                        "기간 직접 입력",
+                        value=(start_d, max_d),
+                        min_value=min_d, max_value=max_d,
+                        disabled=True,
+                        key="date_picker"
+                    )
+                    d = (start_d, max_d)
+                else:
+                    d = st.date_input(
+                        "기간 직접 입력",
+                        value=(min_d, max_d),
+                        min_value=min_d, max_value=max_d,
+                        key="date_picker"
+                    )
             else:
                 d = None
+
             st.markdown("<br>", unsafe_allow_html=True)
             st.download_button(
                 "📥 CSV 다운로드",
@@ -128,6 +169,7 @@ def render_filters(df):
                 use_container_width=True,
             )
 
+    # 필터 적용
     df = df[df["ad_type"].isin(sel_ad)]
     df = df[df["country"].isin(sel_country)]
     df = df[df["type_label"].isin(sel_type)]
@@ -247,17 +289,14 @@ def show_cards(sub_df):
         return
 
     top = sub_df.nlargest(50, "engagement").reset_index(drop=True)
-
     type_colors = {"릴스": "#E1306C", "피드": "#405DE6", "피드(동영상)": "#833AB4"}
 
-    # HTML 그리드로 직접 구성 — 모바일 2열 / PC 4열
     cards_html = """
     <style>
     .ig-grid {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
-        gap: 12px;
-        margin-top: 8px;
+        gap: 12px; margin-top: 8px;
     }
     @media (max-width: 768px) {
         .ig-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
@@ -265,24 +304,16 @@ def show_cards(sub_df):
     .ig-card {
         background: var(--background-color, #fff);
         border: 0.5px solid rgba(128,128,128,0.2);
-        border-radius: 10px;
-        overflow: hidden;
+        border-radius: 10px; overflow: hidden;
     }
-    .ig-card img {
-        width: 100%; aspect-ratio: 1; object-fit: cover; display: block;
-    }
+    .ig-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
     .ig-card-placeholder {
-        width: 100%; aspect-ratio: 1;
-        background: #f0f0f0;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 28px;
+        width: 100%; aspect-ratio: 1; background: #f0f0f0;
+        display: flex; align-items: center; justify-content: center; font-size: 28px;
     }
     .ig-card-body { padding: 7px 8px 10px; }
     .ig-badges { display: flex; gap: 3px; flex-wrap: wrap; margin-bottom: 4px; }
-    .ig-badge {
-        font-size: 9px; font-weight: 500;
-        padding: 1px 6px; border-radius: 10px; color: white;
-    }
+    .ig-badge { font-size: 9px; font-weight: 500; padding: 1px 6px; border-radius: 10px; color: white; }
     .ig-meta { font-size: 10px; color: #888; margin-bottom: 2px; }
     .ig-user { font-size: 11px; font-weight: 500; margin-bottom: 3px; }
     .ig-stats { font-size: 11px; margin-bottom: 4px; }
@@ -292,16 +323,16 @@ def show_cards(sub_df):
     """
 
     for _, row in top.iterrows():
-        thumb      = str(row.get("displayUrl", ""))
-        t_color    = type_colors.get(row["type_label"], "#888")
-        ad_color   = "#FF6B00" if row["ad_type"] == "📢 광고" else "#2E7D32"
-        date_str   = row["timestamp"].strftime("%Y-%m-%d") if pd.notna(row["timestamp"]) else "-"
-        country    = row.get("country", "")
-        username   = str(row.get("ownerUsername", "-"))
-        metric     = f"▶ {fmt(row['videoPlayCount'])}" if row["content_type"] == "reel" else f"❤ {fmt(row['likesCount'])}"
-        comments   = fmt(row["commentsCount"])
-        url        = str(row.get("url", ""))
-        link_html  = f'<a class="ig-link" href="{url}" target="_blank">📎 보기</a>' if url.startswith("http") else ""
+        thumb    = str(row.get("displayUrl", ""))
+        t_color  = type_colors.get(row["type_label"], "#888")
+        ad_color = "#FF6B00" if row["ad_type"] == "📢 광고" else "#2E7D32"
+        date_str = row["timestamp"].strftime("%Y-%m-%d") if pd.notna(row["timestamp"]) else "-"
+        country  = row.get("country", "")
+        username = str(row.get("ownerUsername", "-"))
+        metric   = f"▶ {fmt(row['videoPlayCount'])}" if row["content_type"] == "reel" else f"❤ {fmt(row['likesCount'])}"
+        comments = fmt(row["commentsCount"])
+        url      = str(row.get("url", ""))
+        link_html = f'<a class="ig-link" href="{url}" target="_blank">📎 보기</a>' if url.startswith("http") else ""
 
         if thumb and thumb not in ("nan", ""):
             thumb_html = f'<img src="{thumb}" loading="lazy" onerror="this.parentNode.innerHTML=\'<div class=ig-card-placeholder>🖼️</div>\'">'

@@ -4,11 +4,39 @@ import pandas as pd
 from apify_client import ApifyClient
 from datetime import datetime
 
+
 APIFY_TOKEN = os.getenv('APIFY_API_TOKEN')
 ACTOR_ID    = "apidojo/tweet-scraper"
 OUTPUT_PATH = "data/latest_twitter.csv"
 
 KEYWORDS = ["meitu", "메이투", "뷰티캠"]
+
+
+def extract_image_url(item: dict) -> str:
+    """트윗에서 첫 번째 이미지 URL 추출"""
+
+    # 1) extendedEntities.media (가장 정확)
+    extended = item.get("extendedEntities", {}) or {}
+    media_list = extended.get("media", []) or []
+    for m in media_list:
+        if m.get("type") in ("photo", "animated_gif"):
+            return m.get("mediaUrlHttps", m.get("media_url_https", ""))
+
+    # 2) entities.media
+    entities = item.get("entities", {}) or {}
+    media_list = entities.get("media", []) or []
+    for m in media_list:
+        if m.get("type") == "photo":
+            return m.get("mediaUrlHttps", m.get("media_url_https", ""))
+
+    # 3) 직접 media 필드
+    media = item.get("media", []) or []
+    if isinstance(media, list) and media:
+        m = media[0]
+        if isinstance(m, dict):
+            return m.get("mediaUrlHttps", m.get("url", ""))
+
+    return ""
 
 
 def normalize_tweet(item: dict, keyword: str) -> dict:
@@ -28,8 +56,9 @@ def normalize_tweet(item: dict, keyword: str) -> dict:
         "url":            item.get("url", ""),
         "lang":           item.get("lang", ""),
         "is_retweet":     item.get("isRetweet", False) or False,
+        "media_url":      extract_image_url(item),   # ← 이미지 URL 저장
         "last_updated":   datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "country":        "🇰🇷 한국",  # 한국어만 수집하므로 고정
+        "country":        "🇰🇷 한국",
     }
 
 
@@ -65,16 +94,18 @@ def fetch_twitter():
                 "searchTerms":   [keyword],
                 "maxItems":      50,
                 "sort":          "Latest",
-                "tweetLanguage": "ko",   # 한국어만
+                "tweetLanguage": "ko",
             })
             results = list(client.dataset(run["defaultDatasetId"]).iterate_items())
 
+            count = 0
             for item in results:
                 if item.get("isRetweet", False):
                     continue
                 all_tweets.append(normalize_tweet(item, keyword))
+                count += 1
 
-            print(f"   → {len(results)}건 수집")
+            print(f"   → {count}건 저장 (리트윗 제외)")
 
         if not all_tweets:
             print("⚠️ 수집된 트윗이 없습니다.")
@@ -85,7 +116,8 @@ def fetch_twitter():
         for col in ("view_count", "like_count", "retweet_count", "reply_count"):
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
 
-        print(f"\n✅ 트위터 수집 완료: {len(df)}건")
+        img_count = (df["media_url"] != "").sum()
+        print(f"\n✅ 트위터 수집 완료: {len(df)}건 (이미지 포함: {img_count}건)")
 
         final = append_and_dedup(df)
         final.to_csv(OUTPUT_PATH, index=False, encoding="utf-8-sig")

@@ -1,8 +1,7 @@
 import pandas as pd
 import streamlit as st
 import plotly.express as px
-from datetime import datetime, timedelta, timezone
-from utils import load_and_process, get_weekly_df, fmt, TYPE_COLOR, TYPE_LABEL, render_card_grid
+from utils import load_and_process, get_weekly_df, get_week_range, extract_keywords, fmt, TYPE_COLOR, TYPE_LABEL
 
 st.set_page_config(page_title="Meitu 모니터링", page_icon="📊", layout="wide")
 
@@ -13,39 +12,20 @@ def load_data():
 
 
 def render_kpi_bar(this_week, last_week):
-    """KPI + 지난주 대비 변화량 한 줄 표시"""
-    def delta(a, b):
-        diff = a - b
-        if diff > 0:  return f'<span style="color:#2E7D32;font-size:10px;">▲ {diff}</span>'
-        if diff < 0:  return f'<span style="color:#E1306C;font-size:10px;">▼ {abs(diff)}</span>'
-        return '<span style="color:#888;font-size:10px;">- 0</span>'
-
     metrics = [
-        ("📋 전체",    len(this_week),                                          len(last_week),                                          "var(--color-text-primary)"),
-        ("🎬 릴스",    (this_week["content_type"]=="reel").sum(),               (last_week["content_type"]=="reel").sum(),               "#E1306C"),
-        ("🖼️ 피드",    this_week["content_type"].isin(["feed","video_feed"]).sum(), last_week["content_type"].isin(["feed","video_feed"]).sum(), "#405DE6"),
-        ("🇰🇷 한국",   this_week["is_korean"].sum(),                            last_week["is_korean"].sum(),                            "var(--color-text-primary)"),
-        ("📢 광고",    (this_week["ad_type"]=="📢 광고").sum(),                 (last_week["ad_type"]=="📢 광고").sum(),                 "#FF6B00"),
-        ("🌱 오가닉",  (this_week["ad_type"]=="🌱 오가닉").sum(),               (last_week["ad_type"]=="🌱 오가닉").sum(),               "#2E7D32"),
+        ("📋 전체",   len(this_week),                                               len(last_week)),
+        ("🎬 릴스",   (this_week["content_type"]=="reel").sum(),                    (last_week["content_type"]=="reel").sum()),
+        ("🖼️ 피드",   this_week["content_type"].isin(["feed","video_feed"]).sum(),  last_week["content_type"].isin(["feed","video_feed"]).sum()),
+        ("🇰🇷 한국",  this_week["is_korean"].sum(),                                 last_week["is_korean"].sum()),
+        ("📢 광고",   (this_week["ad_type"]=="📢 광고").sum(),                      (last_week["ad_type"]=="📢 광고").sum()),
+        ("🌱 오가닉", (this_week["ad_type"]=="🌱 오가닉").sum(),                    (last_week["ad_type"]=="🌱 오가닉").sum()),
     ]
-
-    items_html = ""
-    for i, (label, cur, prev, color) in enumerate(metrics):
-        border = "border-right:1px solid var(--color-border-tertiary);" if i < len(metrics)-1 else ""
-        items_html += f"""
-        <div style="flex:1;min-width:55px;text-align:center;padding:0 4px;{border}">
-            <div style="font-size:10px;color:var(--color-text-secondary);">{label}</div>
-            <div style="font-size:17px;font-weight:500;color:{color};">{fmt(cur)}</div>
-            {delta(cur, prev)}
-        </div>
-        """
-
-    st.markdown(
-        f'<div style="display:flex;flex-wrap:nowrap;overflow-x:auto;'
-        f'background:var(--color-background-secondary);border-radius:10px;'
-        f'padding:10px 4px;margin-bottom:8px;">{items_html}</div>',
-        unsafe_allow_html=True
-    )
+    cols = st.columns(len(metrics))
+    for col, (label, cur, prev) in zip(cols, metrics):
+        diff        = int(cur) - int(prev)
+        delta_str   = f"▲ {diff}" if diff > 0 else (f"▼ {abs(diff)}" if diff < 0 else "변화없음")
+        delta_color = "normal" if diff > 0 else ("inverse" if diff < 0 else "off")
+        col.metric(label=label, value=fmt(cur), delta=delta_str, delta_color=delta_color)
 
 
 def render_charts(df):
@@ -69,7 +49,8 @@ def render_charts(df):
         ad_counts = df["ad_type"].value_counts().reset_index()
         ad_counts.columns = ["유형", "건수"]
         fig2 = px.pie(ad_counts, names="유형", values="건수", hole=0.45,
-                      color="유형", color_discrete_map={"📢 광고": "#FF6B00", "🌱 오가닉": "#2E7D32"})
+                      color="유형",
+                      color_discrete_map={"📢 광고": "#FF6B00", "🌱 오가닉": "#2E7D32"})
         fig2.update_traces(textposition="none")
         fig2.update_layout(showlegend=True,
             legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5, font=dict(size=9)),
@@ -83,24 +64,56 @@ def render_charts(df):
         fig3 = px.bar(cc, x="국가", y="건수", labels={"국가": "", "건수": ""})
         fig3.update_layout(showlegend=False,
             margin=dict(t=5, b=5, l=5, r=5), height=180,
-            xaxis=dict(tickfont=dict(size=9)), yaxis=dict(tickfont=dict(size=9)))
+            xaxis=dict(tickfont=dict(size=9)),
+            yaxis=dict(tickfont=dict(size=9)))
         st.plotly_chart(fig3, use_container_width=True)
 
 
+def render_keywords(df):
+    """캡션 키워드 빈도 TOP 15 바차트"""
+    st.subheader("🔤 캡션 키워드 TOP 15")
+    st.caption("수집 키워드(meitu, 뷰티캠 등) 및 의미없는 태그 자동 제외 — 경쟁사 마케팅 주제 파악용")
+
+    kw_df = extract_keywords(df, top_n=15)
+    if kw_df.empty:
+        st.info("키워드 데이터가 없습니다.")
+        return
+
+    fig = px.bar(
+        kw_df,
+        x="언급수",
+        y="키워드",
+        orientation="h",
+        color="언급수",
+        color_continuous_scale=["#E8F4FD", "#E1306C"],
+        labels={"언급수": "언급 횟수", "키워드": ""},
+        text="언급수",
+    )
+    fig.update_traces(textposition="outside")
+    fig.update_layout(
+        showlegend=False,
+        coloraxis_showscale=False,
+        margin=dict(t=10, b=10, l=10, r=60),
+        height=420,
+        yaxis=dict(autorange="reversed"),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def render_top5(df):
-    """TOP 5 — 릴스 / 피드 탭 분리"""
     st.subheader("🏆 이번 주 TOP 5")
+    st.caption("릴스: 조회수 기준 / 피드: 좋아요 기준")
 
     tab_reel, tab_feed = st.tabs(["🎬 릴스 TOP 5", "🖼️ 피드 TOP 5"])
 
     def top5_cards(sub_df, metric_col):
         top = sub_df.nlargest(5, metric_col).reset_index(drop=True)
         if top.empty:
-            st.info("데이터가 없습니다.")
+            st.info("해당 기간 데이터가 없습니다.")
             return
 
-        cols = st.columns(5)
         type_colors = {"릴스": "#E1306C", "피드": "#405DE6", "피드(동영상)": "#833AB4"}
+        cols = st.columns(5)
 
         for i, col in enumerate(cols):
             if i >= len(top):
@@ -112,23 +125,27 @@ def render_top5(df):
                     try:
                         st.image(thumb, use_container_width=True)
                     except:
-                        st.markdown("<div style='background:#f0f0f0;height:80px;border-radius:6px;'></div>", unsafe_allow_html=True)
+                        st.markdown("<div style='background:#f0f0f0;height:100px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:20px;'>🖼️</div>", unsafe_allow_html=True)
                 else:
-                    st.markdown("<div style='background:#f0f0f0;height:80px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:20px;'>🖼️</div>", unsafe_allow_html=True)
+                    st.markdown("<div style='background:#f0f0f0;height:100px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:20px;'>🖼️</div>", unsafe_allow_html=True)
 
-                t_color = type_colors.get(row["type_label"], "#888")
-                metric  = f"▶ {fmt(row['videoPlayCount'])}" if row["content_type"] == "reel" else f"❤ {fmt(row['likesCount'])}"
-                url     = str(row.get("url", ""))
-                link    = f'<a href="{url}" target="_blank" style="font-size:10px;color:#E1306C;">📎 보기</a>' if url.startswith("http") else ""
+                t_color  = type_colors.get(row["type_label"], "#888")
+                ad_color = "#FF6B00" if row["ad_type"] == "📢 광고" else "#2E7D32"
+                metric   = f"▶ {fmt(row['videoPlayCount'])}" if row["content_type"] == "reel" else f"❤ {fmt(row['likesCount'])}"
+                url      = str(row.get("url", ""))
+                link     = f'<a href="{url}" target="_blank" style="font-size:10px;color:#E1306C;text-decoration:none;">📎 보기</a>' if url.startswith("http") else ""
+                date_str = row["timestamp"].strftime("%m/%d") if pd.notna(row["timestamp"]) else "-"
 
                 st.markdown(
+                    f'<div style="margin-top:5px;">'
                     f'<span style="background:{t_color};color:white;font-size:9px;padding:1px 5px;border-radius:8px;">{row["type_label"]}</span>'
-                    f'<div style="font-size:10px;color:#888;margin-top:2px;">{row.get("country","")}</div>'
+                    f'<span style="background:{ad_color};color:white;font-size:9px;padding:1px 5px;border-radius:8px;margin-left:3px;">{row["ad_type"]}</span>'
+                    f'<div style="font-size:10px;color:#888;margin-top:3px;">{date_str} | {row.get("country","")}</div>'
                     f'<div style="font-size:11px;font-weight:500;">@{str(row.get("ownerUsername","-"))}</div>'
-                    f'<div style="font-size:11px;">{metric}</div>'
-                    f'{link}',
-                    unsafe_allow_html=True
-                )
+                    f'<div style="font-size:12px;">{metric}</div>'
+                    f'{link}'
+                    f'</div>',
+                    unsafe_allow_html=True)
 
     with tab_reel:
         top5_cards(df[df["content_type"] == "reel"], "videoPlayCount")
@@ -147,27 +164,41 @@ def main():
 
     if df["last_updated"].notna().any():
         last_kst = df["last_updated"].max() + pd.Timedelta(hours=9)
-        st.caption(f"마지막 수집: **{last_kst.strftime('%Y-%m-%d %H:%M')} KST** | 누적: **{len(df):,}건**")
+        st.caption(
+            f"마지막 수집: **{last_kst.strftime('%Y-%m-%d %H:%M')} KST** "
+            f"| 누적: **{len(df):,}건**"
+        )
 
     # 국가 필터
-    countries    = ["전체"] + sorted(df["country"].unique())
-    sel_country  = st.selectbox("🌍 국가 필터", countries, index=0)
-    filtered_df  = df if sel_country == "전체" else df[df["country"] == sel_country]
+    countries   = ["전체"] + sorted(df["country"].unique())
+    sel_country = st.selectbox("🌍 국가 필터", countries, index=0)
+    filtered_df = df if sel_country == "전체" else df[df["country"] == sel_country]
 
     st.divider()
 
-    # 이번 주 / 지난 주
+    # 주차 계산
+    this_start, this_end = get_week_range(weeks_ago=0)
+    last_start, last_end = get_week_range(weeks_ago=1)
     this_week = get_weekly_df(filtered_df, weeks_ago=0)
     last_week = get_weekly_df(filtered_df, weeks_ago=1)
 
-    st.markdown(f"**이번 주** {this_week['timestamp'].min().strftime('%m/%d') if not this_week.empty else '-'} ~ 오늘 &nbsp;|&nbsp; 지난주 대비 변화")
-    render_kpi_bar(this_week, last_week)
+    st.markdown(
+        f"**이번 주** {this_start.strftime('%m/%d')} ~ {(this_end - pd.Timedelta(days=1)).strftime('%m/%d')}"
+        f" &nbsp;vs&nbsp; "
+        f"**지난 주** {last_start.strftime('%m/%d')} ~ {(last_end - pd.Timedelta(days=1)).strftime('%m/%d')}"
+    )
+
+    display_df = this_week if not this_week.empty else filtered_df
+    render_kpi_bar(display_df, last_week)
 
     st.divider()
     render_charts(filtered_df)
 
     st.divider()
-    render_top5(this_week if not this_week.empty else filtered_df)
+    render_keywords(filtered_df)
+
+    st.divider()
+    render_top5(display_df if not this_week.empty else filtered_df)
 
 
 if __name__ == "__main__":

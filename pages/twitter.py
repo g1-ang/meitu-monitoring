@@ -27,14 +27,23 @@ def fmt(n) -> str:
     return str(n)
 
 
-def top_nav():
+def top_nav(current):
     col1, col2, col3, col4 = st.columns([1, 1, 1, 7])
     with col1:
-        st.page_link("app.py", label="📊 요약")
+        if current == "summary":
+            st.markdown('<span style="display:block;text-align:center;background:#E1306C;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">📊 IG 요약</span>', unsafe_allow_html=True)
+        else:
+            st.page_link("app.py", label="📊 IG 요약")
     with col2:
-        st.page_link("pages/details.py", label="🔍 세부")
+        if current == "details":
+            st.markdown('<span style="display:block;text-align:center;background:#E1306C;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">🔍 IG 세부</span>', unsafe_allow_html=True)
+        else:
+            st.page_link("pages/details.py", label="🔍 IG 세부")
     with col3:
-        st.markdown('<span style="display:block;text-align:center;background:#1D9BF0;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">🐦 트위터</span>', unsafe_allow_html=True)
+        if current == "twitter":
+            st.markdown('<span style="display:block;text-align:center;background:#1D9BF0;color:white;padding:6px 0;border-radius:8px;font-size:14px;font-weight:500;">🐦 트위터</span>', unsafe_allow_html=True)
+        else:
+            st.page_link("pages/twitter.py", label="🐦 트위터")
     st.markdown("<div style='margin-bottom:8px;'></div>", unsafe_allow_html=True)
 
 
@@ -46,7 +55,7 @@ def render_kpi(df):
     c2.metric("📌 meitu + 메이투", fmt(meitu_cnt))
     c3.metric("📌 뷰티캠",         fmt(beauty_cnt))
     c4.metric("❤️ 평균 좋아요",    f"{df['like_count'].mean():.1f}")
-    c5.metric("👁️ 평균 조회수",    fmt(df['view_count'].mean()))
+    c5.metric("👁️ 평균 조회수",    fmt(int(df['view_count'].mean())))
 
 
 def get_first_image(row) -> str:
@@ -121,7 +130,7 @@ def render_tweet_cards(sub_df):
 
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
-top_nav()
+top_nav("twitter")
 st.markdown("## 🐦 트위터 모니터링")
 
 try:

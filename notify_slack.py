@@ -10,8 +10,11 @@ SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 KEYWORD_THRESHOLD = 5
 REEL_VIEW_MIN     = 10000
 FEED_LIKE_MIN     = 500
+TW_LIKE_MIN       = 100
 
 BRAND_KEYWORDS = ["meitu", "메이투", "뷰티캠", "beautycam"]
+AD_PATTERNS    = ["광고", "협찬", "유료광고", "제공", "콜라보", "파트너십",
+                  "ad", "sponsored", "collaboration", "paid", "pr", "promotion"]
 
 DASHBOARD_URL = "https://meitu-monitoring.streamlit.app"
 DETAILS_URL   = "https://meitu-monitoring.streamlit.app/details"
@@ -67,6 +70,11 @@ def classify_content_type(row) -> str:
 
 def is_korean(text: str) -> bool:
     return bool(re.search(r'[가-힣]', str(text)))
+
+
+def is_ad(text: str) -> bool:
+    t = str(text).lower()
+    return any(p in t for p in AD_PATTERNS)
 
 
 def fmt(n) -> str:
@@ -126,16 +134,14 @@ def filter_range(df: pd.DataFrame, date_col: str, start, end) -> pd.DataFrame:
 
 
 def build_ig_top3_blocks(df_kr: pd.DataFrame) -> list:
-    """브랜드 키워드 수집 콘텐츠만 TOP3"""
     blocks = []
 
-    # 브랜드 키워드 필터
     if "search_keyword" in df_kr.columns:
         df_brand = df_kr[df_kr["search_keyword"].isin(BRAND_KEYWORDS)]
     else:
         df_brand = df_kr
 
-    # 릴스 TOP3 (조회수 1만 이상)
+    # 릴스 TOP3
     reels = df_brand[df_brand["content_type"] == "reel"].copy()
     reels = reels[reels["videoPlayCount"] >= REEL_VIEW_MIN].nlargest(3, "videoPlayCount")
 
@@ -150,13 +156,13 @@ def build_ig_top3_blocks(df_kr: pd.DataFrame) -> list:
         "type": "section",
         "text": {
             "type": "mrkdwn",
-            "text": "*릴스 TOP 3* (조회수 1만 이상 · 브랜드 키워드 기준)\n" + (
+            "text": "*릴스 TOP 3* (조회수 1만 이상 · 경쟁사 키워드 기준)\n" + (
                 "\n".join(reel_lines) if reel_lines else "_조건에 해당하는 콘텐츠 없음_"
             )
         }
     })
 
-    # 피드 TOP3 (좋아요 500 이상)
+    # 피드 TOP3
     feeds = df_brand[df_brand["content_type"].isin(["feed", "video_feed"])].copy()
     feeds = feeds[feeds["likesCount"] >= FEED_LIKE_MIN].nlargest(3, "likesCount")
 
@@ -171,7 +177,7 @@ def build_ig_top3_blocks(df_kr: pd.DataFrame) -> list:
         "type": "section",
         "text": {
             "type": "mrkdwn",
-            "text": "*피드 TOP 3* (좋아요 500 이상 · 브랜드 키워드 기준)\n" + (
+            "text": "*피드 TOP 3* (좋아요 500 이상 · 경쟁사 키워드 기준)\n" + (
                 "\n".join(feed_lines) if feed_lines else "_조건에 해당하는 콘텐츠 없음_"
             )
         }
@@ -181,46 +187,75 @@ def build_ig_top3_blocks(df_kr: pd.DataFrame) -> list:
 
 
 def build_tw_top_blocks(df_tw: pd.DataFrame) -> list:
-    """브랜드 키워드 트윗만 좋아요/리트윗 최다 1건씩"""
+    """좋아요/리트윗 TOP + 광고 언급 트윗 — 아이디/수치/링크만"""
     if df_tw.empty:
         return [{"type": "section", "text": {"type": "mrkdwn", "text": "_데이터 없음_"}}]
 
-    # 브랜드 키워드 필터
     if "search_keyword" in df_tw.columns:
         df_brand = df_tw[df_tw["search_keyword"].isin(BRAND_KEYWORDS)]
     else:
         df_brand = df_tw
 
-    if df_brand.empty:
-        return [{"type": "section", "text": {"type": "mrkdwn", "text": "_브랜드 키워드 트윗 없음_"}}]
+    df_filtered = df_brand[df_brand["like_count"] >= TW_LIKE_MIN]
 
-    # 좋아요 최다
-    top_like    = df_brand.nlargest(1, "like_count").iloc[0]
-    text_like   = re.sub(r'https?://\S+', '', str(top_like.get("text", ""))).strip()[:60] + "..."
-    url_like    = str(top_like.get("url", ""))
-    handle_like = str(top_like.get("author_handle", "-"))
-    kw_like     = str(top_like.get("search_keyword", ""))
+    blocks = []
 
-    # 리트윗 최다
-    top_rt    = df_brand.nlargest(1, "retweet_count").iloc[0]
-    text_rt   = re.sub(r'https?://\S+', '', str(top_rt.get("text", ""))).strip()[:60] + "..."
-    url_rt    = str(top_rt.get("url", ""))
-    handle_rt = str(top_rt.get("author_handle", "-"))
-    kw_rt     = str(top_rt.get("search_keyword", ""))
+    # 좋아요 최다 / 리트윗 최다
+    if df_filtered.empty:
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"_좋아요 {TW_LIKE_MIN}건 이상 트윗 없음_"}
+        })
+    else:
+        top_like    = df_filtered.nlargest(1, "like_count").iloc[0]
+        top_like_id = str(top_like.get("tweet_id", ""))
 
-    return [{
-        "type": "section",
-        "fields": [
-            {
+        # 리트윗 최다 — 좋아요 1위와 중복이면 2위
+        top_rt = None
+        for _, row in df_filtered.nlargest(2, "retweet_count").iterrows():
+            if str(row.get("tweet_id", "")) != top_like_id:
+                top_rt = row
+                break
+
+        like_url   = str(top_like.get("url", ""))
+        like_handle = str(top_like.get("author_handle", "-"))
+
+        like_text  = f"*좋아요 최다*\n@{like_handle}  |  좋아요 {fmt(top_like['like_count'])}\n{like_url}"
+        rt_text    = (
+            f"*리트윗 최다*\n@{top_rt.get('author_handle', '-')}  |  리트윗 {fmt(top_rt['retweet_count'])}\n{top_rt.get('url', '')}"
+            if top_rt is not None
+            else "*리트윗 최다*\n_좋아요 최다와 동일 트윗_"
+        )
+
+        blocks.append({
+            "type": "section",
+            "fields": [
+                {"type": "mrkdwn", "text": like_text},
+                {"type": "mrkdwn", "text": rt_text},
+            ]
+        })
+
+    # 광고 언급 트윗
+    ad_tweets = df_brand[df_brand["text"].apply(is_ad)] if "text" in df_brand.columns else pd.DataFrame()
+
+    if not ad_tweets.empty:
+        ad_lines = []
+        for _, row in ad_tweets.nlargest(3, "like_count").iterrows():
+            handle = str(row.get("author_handle", "-"))
+            url    = str(row.get("url", ""))
+            likes  = fmt(row["like_count"])
+            rt     = fmt(row["retweet_count"])
+            ad_lines.append(f"@{handle}  |  좋아요 {likes} · 리트윗 {rt}\n{url}")
+
+        blocks.append({
+            "type": "section",
+            "text": {
                 "type": "mrkdwn",
-                "text": f"*좋아요 최다* (#{kw_like})\n@{handle_like}  |  좋아요 {fmt(top_like['like_count'])}\n_{text_like}_\n{url_like}"
-            },
-            {
-                "type": "mrkdwn",
-                "text": f"*리트윗 최다* (#{kw_rt})\n@{handle_rt}  |  리트윗 {fmt(top_rt['retweet_count'])}\n_{text_rt}_\n{url_rt}"
+                "text": "*광고 언급 트윗* (광고·협찬·sponsored 표현 포함)\n" + "\n".join(ad_lines)
             }
-        ]
-    }]
+        })
+
+    return blocks
 
 
 def notify_weekly_report(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
@@ -231,13 +266,11 @@ def notify_weekly_report(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     weekday   = datetime.now(timezone.utc).weekday()
     day_label = "월요일" if weekday == 0 else "목요일"
 
-    # 인스타 한국 콘텐츠
     ig_cur     = filter_range(ig_df, "timestamp", start, end)
     ig_prev    = filter_range(ig_df, "timestamp", prev_start, prev_end)
     ig_cur_kr  = ig_cur[ig_cur["caption"].apply(is_korean)]  if "caption" in ig_cur.columns  else ig_cur
     ig_prev_kr = ig_prev[ig_prev["caption"].apply(is_korean)] if "caption" in ig_prev.columns else ig_prev
 
-    # 인스타 통계도 브랜드 키워드 기준
     ig_cur_brand  = ig_cur_kr[ig_cur_kr["search_keyword"].isin(BRAND_KEYWORDS)]  if "search_keyword" in ig_cur_kr.columns  else ig_cur_kr
     ig_prev_brand = ig_prev_kr[ig_prev_kr["search_keyword"].isin(BRAND_KEYWORDS)] if "search_keyword" in ig_prev_kr.columns else ig_prev_kr
 
@@ -246,7 +279,6 @@ def notify_weekly_report(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     cur_feed  = ig_cur_brand["content_type"].isin(["feed", "video_feed"]).sum()
     prev_feed = ig_prev_brand["content_type"].isin(["feed", "video_feed"]).sum()
 
-    # 트위터
     tw_cur  = filter_range(tw_df, "created_at", start, end)  if not tw_df.empty else pd.DataFrame()
     tw_prev = filter_range(tw_df, "created_at", prev_start, prev_end) if not tw_df.empty else pd.DataFrame()
 
@@ -265,7 +297,7 @@ def notify_weekly_report(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
         },
         {
             "type": "context",
-            "elements": [{"type": "mrkdwn", "text": f"발송: *{now_kst.strftime('%Y-%m-%d %H:%M')} KST*  |  기간: {label}  |  한국 · 브랜드 키워드 기준"}]
+            "elements": [{"type": "mrkdwn", "text": f"발송: *{now_kst.strftime('%Y-%m-%d %H:%M')} KST*  |  기간: {label}  |  한국 · 경쟁사 키워드 기준"}]
         },
         {"type": "divider"},
         {
@@ -273,7 +305,7 @@ def notify_weekly_report(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
             "text": {
                 "type": "mrkdwn",
                 "text": (
-                    f"*인스타그램 (한국 · 브랜드)*\n"
+                    f"*인스타그램 (한국 · 경쟁사)*\n"
                     f"릴스: *{cur_reel}건* ({delta_str(cur_reel, prev_reel)})  |  "
                     f"피드: *{cur_feed}건* ({delta_str(cur_feed, prev_feed)})"
                 )
@@ -288,7 +320,7 @@ def notify_weekly_report(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
         "text": {
             "type": "mrkdwn",
             "text": (
-                f"*트위터 (한국 · 브랜드)*\n"
+                f"*트위터 (한국 · 경쟁사)*\n"
                 f"meitu+메이투: *{cur_meitu}건* ({delta_str(cur_meitu, prev_meitu)})  |  "
                 f"뷰티캠: *{cur_beauty}건* ({delta_str(cur_beauty, prev_beauty)})"
             )

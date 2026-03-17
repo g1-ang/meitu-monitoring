@@ -3,7 +3,7 @@ import streamlit as st
 import plotly.express as px
 from utils import load_and_process, get_weekly_df, get_week_range, extract_keywords, fmt, TYPE_COLOR, TYPE_LABEL
 
-st.set_page_config(page_title="요약 페이지", page_icon="📊", layout="wide")
+st.set_page_config(page_title="IG Summary", page_icon="📊", layout="wide")
 
 COUNTRY_ORDER  = ["🇰🇷 한국", "🇯🇵 일본", "🇨🇳 중국/대만", "🇹🇭 태국", "🌐 영어권", "🇪🇺 유럽", "🌏 기타"]
 BRAND_KEYWORDS = ["meitu", "메이투", "뷰티캠", "beautycam"]
@@ -12,7 +12,6 @@ BRAND_KEYWORDS = ["meitu", "메이투", "뷰티캠", "beautycam"]
 @st.cache_data(ttl=300)
 def load_data():
     df = load_and_process("data/latest_monitoring.csv")
-
     if "keyword_type" not in df.columns:
         df["keyword_type"] = df["search_keyword"].apply(
             lambda x: "브랜드" if str(x).lower() in BRAND_KEYWORDS else "카테고리"
@@ -103,12 +102,10 @@ def render_charts(df):
 def render_keywords(df):
     st.subheader("🔤 캡션 키워드 TOP 15")
     st.caption("수집 키워드(meitu, 뷰티캠 등) 및 의미없는 태그 자동 제외 — 경쟁사 마케팅 주제 파악용")
-
     kw_df = extract_keywords(df, top_n=15)
     if kw_df.empty:
         st.info("키워드 데이터가 없습니다.")
         return
-
     fig = px.bar(kw_df, x="언급수", y="키워드", orientation="h",
                  color="언급수", color_continuous_scale=["#E8F4FD", "#E1306C"],
                  labels={"언급수": "언급 횟수", "키워드": ""}, text="언급수")
@@ -124,10 +121,8 @@ def render_top5_cards(sub_df, metric_col):
     if top.empty:
         st.info("이번 주 데이터가 없습니다. 다음 수집 후 확인해주세요.")
         return
-
     type_colors = {"릴스": "#E1306C", "피드": "#405DE6", "피드(동영상)": "#833AB4"}
     cols = st.columns(5)
-
     for i, col in enumerate(cols):
         if i >= len(top):
             break
@@ -141,14 +136,12 @@ def render_top5_cards(sub_df, metric_col):
                     st.markdown("<div style='background:#f0f0f0;height:100px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:20px;'>🖼️</div>", unsafe_allow_html=True)
             else:
                 st.markdown("<div style='background:#f0f0f0;height:100px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:20px;'>🖼️</div>", unsafe_allow_html=True)
-
             t_color  = type_colors.get(row["type_label"], "#888")
             ad_color = "#FF6B00" if row["ad_type"] == "📢 광고" else "#2E7D32"
             metric   = f"▶ {fmt(row['videoPlayCount'])}" if row["content_type"] == "reel" else f"❤ {fmt(row['likesCount'])}"
             url      = str(row.get("url", ""))
             link     = f'<a href="{url}" target="_blank" style="font-size:10px;color:#E1306C;text-decoration:none;">📎 보기</a>' if url.startswith("http") else ""
             date_str = row["timestamp"].strftime("%m/%d") if pd.notna(row["timestamp"]) else "-"
-
             st.markdown(
                 f'<div style="margin-top:5px;">'
                 f'<span style="background:{t_color};color:white;font-size:9px;padding:1px 5px;border-radius:8px;">{row["type_label"]}</span>'
@@ -164,43 +157,30 @@ def render_top5_cards(sub_df, metric_col):
 def render_top5(brand_df, category_df):
     st.subheader("🏆 이번 주 TOP 5")
     st.caption("릴스: 조회수 기준 / 피드: 좋아요 기준 / 카테고리: 인게이지먼트 기준")
-
     tab_reel, tab_feed, tab_category = st.tabs([
         "🎬 경쟁사 릴스 TOP 5",
         "🖼️ 경쟁사 피드 TOP 5",
         "📂 카테고리 TOP 5",
     ])
-
     with tab_reel:
         render_top5_cards(brand_df[brand_df["content_type"] == "reel"], "videoPlayCount")
-
     with tab_feed:
         render_top5_cards(brand_df[brand_df["content_type"].isin(["feed", "video_feed"])], "likesCount")
-
     with tab_category:
         render_top5_cards(category_df, "engagement")
 
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
 df = load_data()
-
 top_nav("summary")
-
 st.markdown("## 📊 Meitu 모니터링 — 요약")
 
 if df["last_updated"].notna().any():
     last_kst = df["last_updated"].max() + pd.Timedelta(hours=9)
-    st.caption(
-        f"마지막 수집: **{last_kst.strftime('%Y-%m-%d %H:%M')} KST** "
-        f"| 누적: **{len(df):,}건**"
-    )
+    st.caption(f"마지막 수집: **{last_kst.strftime('%Y-%m-%d %H:%M')} KST** | 누적: **{len(df):,}건**")
 
 available_countries = [c for c in COUNTRY_ORDER if c in df["country"].unique()]
-sel_countries = st.multiselect(
-    "🌍 국가 필터 (복수 선택 가능)",
-    options=available_countries,
-    default=available_countries,
-)
+sel_countries = st.multiselect("🌍 국가 필터 (복수 선택 가능)", options=available_countries, default=available_countries)
 filtered_df = df[df["country"].isin(sel_countries)] if sel_countries else df
 
 st.divider()

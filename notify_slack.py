@@ -3,10 +3,13 @@ import re
 import json
 import pandas as pd
 import urllib.request
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 KEYWORD_THRESHOLD = 5
+REEL_VIEW_MIN     = 10000
+FEED_LIKE_MIN     = 500
 
 DASHBOARD_URL = "https://meitu-monitoring.streamlit.app"
 DETAILS_URL   = "https://meitu-monitoring.streamlit.app/details"
@@ -29,6 +32,8 @@ def load_instagram() -> pd.DataFrame:
     for col in ("likesCount", "commentsCount", "videoPlayCount"):
         df[col] = pd.to_numeric(df.get(col, 0), errors="coerce").fillna(0).astype(int)
     df["timestamp"] = pd.to_datetime(df.get("timestamp", ""), errors="coerce", utc=True)
+    if "content_type" not in df.columns:
+        df["content_type"] = df.apply(classify_content_type, axis=1)
     return df
 
 
@@ -43,17 +48,7 @@ def load_twitter() -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def get_this_week(df: pd.DataFrame, date_col: str) -> pd.DataFrame:
-    now         = datetime.now(timezone.utc)
-    this_monday = now - timedelta(
-        days=now.weekday(),
-        hours=now.hour, minutes=now.minute,
-        seconds=now.second, microseconds=now.microsecond
-    )
-    return df[df[date_col] >= this_monday].copy()
-
-
-def classify_content_type(row):
+def classify_content_type(row) -> str:
     product_type = str(row.get("productType", "")).lower().strip()
     media_type   = str(row.get("type", "")).lower().strip()
     url          = str(row.get("url", ""))
@@ -68,114 +63,308 @@ def classify_content_type(row):
     return "unknown"
 
 
-def notify_summary(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
-    now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
-    ig_week = get_this_week(ig_df, "timestamp")
-    tw_week = get_this_week(tw_df, "created_at") if not tw_df.empty else pd.DataFrame()
+def is_korean(text: str) -> bool:
+    return bool(re.search(r'[가-힣]', str(text)))
 
-    # 인스타 통계
-    ig_total  = len(ig_week)
 
-    if "content_type" not in ig_week.columns and "productType" in ig_week.columns:
-        ig_week["content_type"] = ig_week.apply(classify_content_type, axis=1)
+def fmt(n) -> str:
+    n = int(n)
+    if n >= 10000: return f"{n/10000:.1f}만"
+    if n >= 1000:  return f"{n/1000:.1f}천"
+    return str(n)
 
-    ig_reel   = (ig_week["content_type"] == "reel").sum() if "content_type" in ig_week.columns else "-"
-    ig_feed   = ig_week["content_type"].isin(["feed", "video_feed"]).sum() if "content_type" in ig_week.columns else "-"
-    ig_korean = ig_week["caption"].apply(lambda x: bool(re.search(r'[가-힣]', str(x)))).sum() if "caption" in ig_week.columns else "-"
-    ig_ad     = (ig_week["ad_type"] == "📢 광고").sum() if "ad_type" in ig_week.columns else "-"
-    ig_total_all = len(ig_df)
 
-    # 트위터 통계
-    tw_total  = len(tw_week) if not tw_week.empty else 0
-    tw_meitu  = len(tw_week[tw_week["search_keyword"].isin(["meitu", "메이투"])]) if not tw_week.empty and "search_keyword" in tw_week.columns else 0
-    tw_beauty = len(tw_week[tw_week["search_keyword"] == "뷰티캠"]) if not tw_week.empty and "search_keyword" in tw_week.columns else 0
-    tw_total_all = len(tw_df) if not tw_df.empty else 0
+def delta_str(cur: int, prev: int) -> str:
+    diff = cur - prev
+    if diff > 0:  return f"+{diff}건"
+    if diff < 0:  return f"{diff}건"
+    return "±0건"
+
+
+def get_monday(weeks_ago: int = 0) -> datetime:
+    now         = datetime.now(timezone.utc)
+    this_monday = now - timedelta(
+        days=now.weekday(),
+        hours=now.hour, minutes=now.minute,
+        seconds=now.second, microseconds=now.microsecond
+    )
+    return this_monday - timedelta(weeks=weeks_ago)
+
+
+def get_report_range():
+    """
+    월요일 → 지난 주 월~일 전체
+    목요일 → 이번 주 월요일 ~ 현재
+    """
+    now     = datetime.now(timezone.utc)
+    weekday = now.weekday()
+
+    if weekday == 0:
+        start = get_monday(weeks_ago=1)
+        end   = get_monday(weeks_ago=0)
+        label = f"지난 주 ({start.strftime('%m/%d')} ~ {(end - timedelta(days=1)).strftime('%m/%d')})"
+    else:
+        start = get_monday(weeks_ago=0)
+        end   = now
+        label = f"이번 주 ({start.strftime('%m/%d')} ~ {now.strftime('%m/%d %H:%M')})"
+
+    return start, end, label
+
+
+def get_prev_range():
+    """비교 대상 기간"""
+    now     = datetime.now(timezone.utc)
+    weekday = now.weekday()
+
+    if weekday == 0:
+        start = get_monday(weeks_ago=2)
+        end   = get_monday(weeks_ago=1)
+    else:
+        this_start    = get_monday(weeks_ago=0)
+        days_elapsed  = now - this_start
+        start         = this_start - timedelta(weeks=1)
+        end           = start + days_elapsed
+
+    return start, end
+
+
+def filter_range(df: pd.DataFrame, date_col: str, start, end) -> pd.DataFrame:
+    return df[(df[date_col] >= start) & (df[date_col] < end)].copy()
+
+
+def build_ig_top3_blocks(df_kr: pd.DataFrame) -> list:
+    blocks = []
+
+    # 릴스 TOP3
+    reels = df_kr[df_kr["content_type"] == "reel"].copy()
+    reels = reels[reels["videoPlayCount"] >= REEL_VIEW_MIN].nlargest(3, "videoPlayCount")
+
+    reel_lines = []
+    for i, (_, row) in enumerate(reels.iterrows(), 1):
+        url      = str(row.get("url", ""))
+        username = str(row.get("ownerUsername", "-"))
+        views    = fmt(row["videoPlayCount"])
+        reel_lines.append(f"*{i}위* @{username}  |  조회수 {views}\n{url}")
+
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": "*릴스 TOP 3* (조회수 1만 이상)\n" + ("\n".join(reel_lines) if reel_lines else "_조건에 해당하는 콘텐츠 없음_")
+        }
+    })
+
+    # 피드 TOP3
+    feeds = df_kr[df_kr["content_type"].isin(["feed", "video_feed"])].copy()
+    feeds = feeds[feeds["likesCount"] >= FEED_LIKE_MIN].nlargest(3, "likesCount")
+
+    feed_lines = []
+    for i, (_, row) in enumerate(feeds.iterrows(), 1):
+        url      = str(row.get("url", ""))
+        username = str(row.get("ownerUsername", "-"))
+        likes    = fmt(row["likesCount"])
+        feed_lines.append(f"*{i}위* @{username}  |  좋아요 {likes}\n{url}")
+
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": "*피드 TOP 3* (좋아요 500 이상)\n" + ("\n".join(feed_lines) if feed_lines else "_조건에 해당하는 콘텐츠 없음_")
+        }
+    })
+
+    return blocks
+
+
+def build_tw_top_blocks(df_tw: pd.DataFrame) -> list:
+    if df_tw.empty:
+        return [{"type": "section", "text": {"type": "mrkdwn", "text": "_데이터 없음_"}}]
+
+    blocks = []
+
+    # 좋아요 최다
+    top_like = df_tw.nlargest(1, "like_count").iloc[0]
+    text_like = str(top_like.get("text", ""))
+    text_like = re.sub(r'https?://\S+', '', text_like).strip()[:60] + "..."
+    url_like  = str(top_like.get("url", ""))
+    handle_like = str(top_like.get("author_handle", "-"))
+
+    # 리트윗 최다
+    top_rt = df_tw.nlargest(1, "retweet_count").iloc[0]
+    text_rt = str(top_rt.get("text", ""))
+    text_rt = re.sub(r'https?://\S+', '', text_rt).strip()[:60] + "..."
+    url_rt  = str(top_rt.get("url", ""))
+    handle_rt = str(top_rt.get("author_handle", "-"))
+
+    blocks.append({
+        "type": "section",
+        "fields": [
+            {
+                "type": "mrkdwn",
+                "text": f"*좋아요 최다*\n@{handle_like}  |  좋아요 {fmt(top_like['like_count'])}\n_{text_like}_\n{url_like}"
+            },
+            {
+                "type": "mrkdwn",
+                "text": f"*리트윗 최다*\n@{handle_rt}  |  리트윗 {fmt(top_rt['retweet_count'])}\n_{text_rt}_\n{url_rt}"
+            }
+        ]
+    })
+
+    return blocks
+
+
+def notify_weekly_report(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
+    now_kst           = datetime.now(timezone.utc) + timedelta(hours=9)
+    start, end, label = get_report_range()
+    prev_start, prev_end = get_prev_range()
+
+    weekday   = datetime.now(timezone.utc).weekday()
+    day_label = "월요일" if weekday == 0 else "목요일"
+
+    # 인스타 한국 콘텐츠
+    ig_cur  = filter_range(ig_df, "timestamp", start, end)
+    ig_prev = filter_range(ig_df, "timestamp", prev_start, prev_end)
+    ig_cur_kr  = ig_cur[ig_cur["caption"].apply(is_korean)]  if "caption" in ig_cur.columns  else ig_cur
+    ig_prev_kr = ig_prev[ig_prev["caption"].apply(is_korean)] if "caption" in ig_prev.columns else ig_prev
+
+    cur_reel  = (ig_cur_kr["content_type"] == "reel").sum()
+    prev_reel = (ig_prev_kr["content_type"] == "reel").sum()
+    cur_feed  = ig_cur_kr["content_type"].isin(["feed", "video_feed"]).sum()
+    prev_feed = ig_prev_kr["content_type"].isin(["feed", "video_feed"]).sum()
+
+    # 트위터
+    tw_cur  = filter_range(tw_df, "created_at", start, end)  if not tw_df.empty else pd.DataFrame()
+    tw_prev = filter_range(tw_df, "created_at", prev_start, prev_end) if not tw_df.empty else pd.DataFrame()
+
+    def tw_cnt(df, kws):
+        return len(df[df["search_keyword"].isin(kws)]) if not df.empty and "search_keyword" in df.columns else 0
+
+    cur_meitu   = tw_cnt(tw_cur,  ["meitu", "메이투"])
+    prev_meitu  = tw_cnt(tw_prev, ["meitu", "메이투"])
+    cur_beauty  = tw_cnt(tw_cur,  ["뷰티캠"])
+    prev_beauty = tw_cnt(tw_prev, ["뷰티캠"])
 
     blocks = [
         {
             "type": "header",
-            "text": {"type": "plain_text", "text": "📊 Meitu 모니터링 — 수집 완료", "emoji": True}
+            "text": {"type": "plain_text", "text": f"Meitu 주간 리포트 ({day_label})", "emoji": True}
         },
         {
             "type": "context",
-            "elements": [{"type": "mrkdwn", "text": f"수집 시각: *{now_kst.strftime('%Y-%m-%d %H:%M')} KST*"}]
+            "elements": [{"type": "mrkdwn", "text": f"발송: *{now_kst.strftime('%Y-%m-%d %H:%M')} KST*  |  기간: {label}  |  한국 콘텐츠 기준"}]
         },
         {"type": "divider"},
         {
             "type": "section",
-            "text": {"type": "mrkdwn", "text": "*📸 인스타그램 — 이번 주*"}
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    f"*인스타그램 (한국)*\n"
+                    f"릴스: *{cur_reel}건* ({delta_str(cur_reel, prev_reel)})  |  "
+                    f"피드: *{cur_feed}건* ({delta_str(cur_feed, prev_feed)})"
+                )
+            }
         },
-        {
-            "type": "section",
-            "fields": [
-                {"type": "mrkdwn", "text": f"*전체*\n{ig_total}건"},
-                {"type": "mrkdwn", "text": f"*🎬 릴스*\n{ig_reel}건"},
-                {"type": "mrkdwn", "text": f"*🖼️ 피드*\n{ig_feed}건"},
-                {"type": "mrkdwn", "text": f"*🇰🇷 한국*\n{ig_korean}건"},
-                {"type": "mrkdwn", "text": f"*📢 광고*\n{ig_ad}건"},
-                {"type": "mrkdwn", "text": f"*📋 누적*\n{ig_total_all:,}건"},
-            ]
-        },
-        {"type": "divider"},
-        {
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": "*🐦 트위터 — 이번 주*"}
-        },
-        {
-            "type": "section",
-            "fields": [
-                {"type": "mrkdwn", "text": f"*전체*\n{tw_total}건"},
-                {"type": "mrkdwn", "text": f"*meitu + 메이투*\n{tw_meitu}건"},
-                {"type": "mrkdwn", "text": f"*뷰티캠*\n{tw_beauty}건"},
-                {"type": "mrkdwn", "text": f"*📋 누적*\n{tw_total_all:,}건"},
-            ]
-        },
+    ]
+
+    blocks += build_ig_top3_blocks(ig_cur_kr)
+    blocks.append({"type": "divider"})
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": (
+                f"*트위터 (한국)*\n"
+                f"meitu+메이투: *{cur_meitu}건* ({delta_str(cur_meitu, prev_meitu)})  |  "
+                f"뷰티캠: *{cur_beauty}건* ({delta_str(cur_beauty, prev_beauty)})"
+            )
+        }
+    })
+    blocks += build_tw_top_blocks(tw_cur)
+    blocks += [
         {"type": "divider"},
         {
             "type": "actions",
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "📊 대시보드 보기", "emoji": True},
+                    "text": {"type": "plain_text", "text": "대시보드 보기", "emoji": True},
                     "url": DASHBOARD_URL,
                     "style": "primary"
                 }
             ]
         }
     ]
+
     send_slack(blocks)
+    print(f"주간 리포트 전송 완료 ({day_label})")
 
 
-def notify_keyword_spike(ig_df: pd.DataFrame):
-    if "search_keyword" not in ig_df.columns or "caption" not in ig_df.columns:
-        print("⚠️ search_keyword 컬럼 없음 — 키워드 급증 감지 스킵")
-        return
+def notify_keyword_spike(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
+    start, end, _ = get_report_range()
 
-    ig_week   = get_this_week(ig_df, "timestamp")
-    ig_korean = ig_week[ig_week["caption"].apply(lambda x: bool(re.search(r'[가-힣]', str(x))))]
+    ig_cur = filter_range(ig_df, "timestamp", start, end)
+    tw_cur = filter_range(tw_df, "created_at", start, end) if not tw_df.empty else pd.DataFrame()
 
-    if ig_korean.empty:
-        return
+    STOPWORDS = {
+        "meitu", "메이투", "뷰티캠", "beautycam", "beauty", "cam",
+        "fyp", "foryou", "viral", "reels", "reel", "love", "like",
+        "follow", "share", "instagram", "insta", "photo", "video",
+        "좋아요", "팔로우", "댓글", "공유", "인스타", "인스타그램",
+    }
 
-    kw_counts = ig_korean["search_keyword"].value_counts()
-    spikes    = kw_counts[kw_counts >= KEYWORD_THRESHOLD]
+    # 인스타 키워드 분석
+    ig_spike_lines = []
+    if "caption" in ig_cur.columns:
+        ig_kr   = ig_cur[ig_cur["caption"].apply(is_korean)]
+        counter = Counter()
+        for caption in ig_kr["caption"].dropna():
+            for tag in re.findall(r'#(\w+)', str(caption).lower()):
+                if tag not in STOPWORDS and len(tag) >= 2:
+                    counter[tag] += 1
+        ig_spikes      = {k: v for k, v in counter.items() if v >= KEYWORD_THRESHOLD}
+        ig_spike_lines = [f"• *#{kw}* — {cnt}건" for kw, cnt in sorted(ig_spikes.items(), key=lambda x: -x[1])]
 
-    if spikes.empty:
+    # 트위터 키워드 분석
+    tw_spike_lines = []
+    if not tw_cur.empty and "text" in tw_cur.columns:
+        counter = Counter()
+        for text in tw_cur["text"].dropna():
+            for tag in re.findall(r'#(\w+)', str(text).lower()):
+                if tag not in STOPWORDS and len(tag) >= 2:
+                    counter[tag] += 1
+            for word in re.findall(r'[가-힣]{2,}', str(text)):
+                if word not in STOPWORDS:
+                    counter[word] += 1
+        tw_spikes      = {k: v for k, v in counter.items() if v >= KEYWORD_THRESHOLD}
+        tw_spike_lines = [f"• *#{kw}* — {cnt}건" for kw, cnt in sorted(tw_spikes.items(), key=lambda x: -x[1])]
+
+    if not ig_spike_lines and not tw_spike_lines:
         print("키워드 급증 없음")
         return
-
-    spike_lines = "\n".join([f"• *#{kw}* — {cnt}건" for kw, cnt in spikes.items()])
 
     blocks = [
         {
             "type": "header",
-            "text": {"type": "plain_text", "text": "🚨 키워드 급증 감지!", "emoji": True}
+            "text": {"type": "plain_text", "text": "키워드 급증 감지!", "emoji": True}
+        },
+        {
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": f"기준: 한국 콘텐츠 캡션  |  {KEYWORD_THRESHOLD}건 이상 언급"}]
+        },
+        {"type": "divider"},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "*인스타그램*\n" + ("\n".join(ig_spike_lines) if ig_spike_lines else "_해당 없음_")
+            }
         },
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"이번 주 🇰🇷 한국 콘텐츠에서 *{KEYWORD_THRESHOLD}건 이상* 언급된 키워드가 있어요!\n\n{spike_lines}"
+                "text": "*트위터*\n" + ("\n".join(tw_spike_lines) if tw_spike_lines else "_해당 없음_")
             }
         },
         {"type": "divider"},
@@ -184,24 +373,25 @@ def notify_keyword_spike(ig_df: pd.DataFrame):
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "🔍 세부 페이지 보기", "emoji": True},
+                    "text": {"type": "plain_text", "text": "세부 페이지 보기", "emoji": True},
                     "url": DETAILS_URL,
                     "style": "primary"
                 }
             ]
         }
     ]
+
     send_slack(blocks)
-    print(f"🚨 키워드 급증 알람 전송: {list(spikes.index)}")
+    print("키워드 급증 알람 전송 완료")
 
 
 def main():
-    print("📨 슬랙 알람 전송 시작...")
+    print("슬랙 알람 전송 시작...")
     ig_df = load_instagram()
     tw_df = load_twitter()
-    notify_summary(ig_df, tw_df)
-    notify_keyword_spike(ig_df)
-    print("✅ 슬랙 알람 완료!")
+    notify_weekly_report(ig_df, tw_df)
+    notify_keyword_spike(ig_df, tw_df)
+    print("슬랙 알람 완료!")
 
 
 if __name__ == "__main__":

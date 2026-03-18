@@ -128,18 +128,24 @@ def render_top5_cards(sub_df, metric_col):
         row = top.iloc[i]
         with col:
             thumb = str(row.get("displayUrl", ""))
+            url   = str(row.get("url", ""))
+            # 썸네일 클릭 시 인스타그램으로 이동
             if thumb and thumb not in ("nan", ""):
-                try:
+                if url.startswith("http"):
+                    st.markdown(
+                        f'<a href="{url}" target="_blank">'
+                        f'<img src="{thumb}" style="width:100%;border-radius:8px;cursor:pointer;" onerror="this.style.display=\'none\'">'
+                        f'</a>',
+                        unsafe_allow_html=True
+                    )
+                else:
                     st.image(thumb, use_container_width=True)
-                except:
-                    st.markdown("<div style='background:#f0f0f0;height:100px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:20px;'>🖼️</div>", unsafe_allow_html=True)
             else:
                 st.markdown("<div style='background:#f0f0f0;height:100px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:20px;'>🖼️</div>", unsafe_allow_html=True)
+
             t_color  = type_colors.get(row["type_label"], "#888")
             ad_color = "#FF6B00" if row["ad_type"] == "📢 광고" else "#2E7D32"
             metric   = f"▶ {fmt(row['videoPlayCount'])}" if row["content_type"] == "reel" else f"❤ {fmt(row['likesCount'])}"
-            url      = str(row.get("url", ""))
-            link     = f'<a href="{url}" target="_blank" style="font-size:10px;color:#E1306C;text-decoration:none;">📎 보기</a>' if url.startswith("http") else ""
             date_str = row["timestamp"].strftime("%m/%d") if pd.notna(row["timestamp"]) else "-"
             st.markdown(
                 f'<div style="margin-top:5px;">'
@@ -148,14 +154,16 @@ def render_top5_cards(sub_df, metric_col):
                 f'<div style="font-size:10px;color:#888;margin-top:3px;">{date_str} | {row.get("country","")}</div>'
                 f'<div style="font-size:11px;font-weight:500;">@{str(row.get("ownerUsername","-"))}</div>'
                 f'<div style="font-size:12px;">{metric}</div>'
-                f'{link}</div>',
+                f'</div>',
                 unsafe_allow_html=True)
 
 
 def render_top5(brand_df, category_df):
     st.subheader("🏆 이번 주 TOP 5")
     st.caption("릴스: 조회수 기준 / 피드: 좋아요 기준 / 카테고리: 인게이지먼트 기준")
-    tab_reel, tab_feed, tab_category = st.tabs(["🎬 경쟁사 릴스 TOP 5", "🖼️ 경쟁사 피드 TOP 5", "📂 카테고리 TOP 5"])
+    tab_reel, tab_feed, tab_category = st.tabs([
+        "🎬 경쟁사 릴스 TOP 5", "🖼️ 경쟁사 피드 TOP 5", "📂 카테고리 TOP 5",
+    ])
     with tab_reel:
         render_top5_cards(brand_df[brand_df["content_type"] == "reel"], "videoPlayCount")
     with tab_feed:

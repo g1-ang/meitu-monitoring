@@ -13,17 +13,15 @@ TYPE_LABEL = {
     "feed":       "피드",
     "video_feed": "피드(동영상)",
 }
-
-# 캡션 키워드 기반 광고 감지
 AD_KEYWORDS = [
     "광고", "유료광고", "유료_광고", "협찬", "제공", "콜라보",
     "ad", "sponsored", "collaboration", "paid", "promotion",
     "partnership", "파트너십", "collab", "pr",
 ]
-
-# 브랜디드 콘텐츠 감지 대상 계정
-BRANDED_ACCOUNTS = ["meitu.kr", "beautycam.kr", "meitu_korea", "beautycam_korea"]
-
+BRANDED_ACCOUNTS = [
+    "meitu.kr", "meitu.app", "meitu.jp", "meitutw",
+    "beautycam.kr", "beautycam.app", "beautycam.jp",
+]
 STOPWORDS = {
     "meitu", "메이투", "뷰티캠", "beautycam", "beauty", "cam",
     "fyp", "foryou", "foryoupage", "viral", "reels", "reel",
@@ -49,28 +47,16 @@ def detect_country(text: str) -> str:
 
 
 def detect_ad(row: pd.Series) -> str:
-    """
-    광고 감지 우선순위:
-    1. is_branded == True → 브랜디드 콘텐츠 (meitu.kr / beautycam.kr 협찬)
-    2. coauthor_accounts 에 대상 계정 포함
-    3. 캡션에 광고 키워드 포함
-    """
-    # 1) 브랜디드 콘텐츠 필드
     is_branded = str(row.get("is_branded", "false")).lower()
     if is_branded == "true":
         return "📢 광고"
-
-    # 2) coauthor_accounts 필드
     coauthors = str(row.get("coauthor_accounts", "")).lower()
     if coauthors and any(acc in coauthors for acc in BRANDED_ACCOUNTS):
         return "📢 광고"
-
-    # 3) 캡션 키워드
     caption = str(row.get("caption", "")).lower()
     for kw in AD_KEYWORDS:
         if f"#{kw.lower()}" in caption or f" {kw.lower()} " in caption or caption.startswith(kw.lower()):
             return "📢 광고"
-
     return "🌱 오가닉"
 
 
@@ -79,7 +65,6 @@ def classify_content_type(row: pd.Series) -> str:
     media_type   = str(row.get("type", "")).lower().strip()
     url          = str(row.get("url", ""))
     video_url    = str(row.get("videoUrl", ""))
-
     if product_type == "clips":                         return "reel"
     if product_type == "carousel_item":                 return "carousel_item"
     if product_type in ("feed", "carousel_container"):  return "feed"
@@ -119,9 +104,7 @@ def load_and_process(path: str = "data/latest_monitoring.csv") -> pd.DataFrame:
         )
 
     df["country"] = df.get("caption", "").apply(detect_country)
-
-    # 광고 감지 — 브랜디드 콘텐츠 + 캡션 키워드 통합
-    df["ad_type"]   = df.apply(detect_ad, axis=1)
+    df["ad_type"] = df.apply(detect_ad, axis=1)
     df["is_korean"] = df["country"] == "🇰🇷 한국"
 
     return df
@@ -170,16 +153,17 @@ def render_card_grid(sub_df: pd.DataFrame, fmt_fn) -> str:
     .ig-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:8px; }
     @media(max-width:768px){ .ig-grid{ grid-template-columns:repeat(2,1fr); gap:8px; } }
     .ig-card { background:var(--background-color,#fff); border:0.5px solid rgba(128,128,128,0.2); border-radius:10px; overflow:hidden; }
-    .ig-card img { width:100%; aspect-ratio:1; object-fit:cover; display:block; }
+    .ig-thumb-link { display:block; cursor:pointer; }
+    .ig-thumb-link img { width:100%; aspect-ratio:1; object-fit:cover; display:block; transition:opacity 0.15s; }
+    .ig-thumb-link:hover img { opacity:0.85; }
     .ig-placeholder { width:100%; aspect-ratio:1; background:#f0f0f0; display:flex; align-items:center; justify-content:center; font-size:28px; }
     .ig-body { padding:7px 8px 10px; }
     .ig-badges { display:flex; gap:3px; flex-wrap:wrap; margin-bottom:4px; }
     .ig-badge { font-size:9px; font-weight:500; padding:1px 6px; border-radius:10px; color:white; }
+    .ig-branded { font-size:9px; color:#FF6B00; margin-bottom:3px; }
     .ig-meta { font-size:10px; color:#888; margin-bottom:2px; }
     .ig-user { font-size:11px; font-weight:500; margin-bottom:3px; }
     .ig-stats { font-size:11px; margin-bottom:4px; }
-    .ig-link { font-size:10px; color:#E1306C; text-decoration:none; }
-    .ig-branded { font-size:9px; color:#FF6B00; margin-bottom:3px; }
     </style>
     <div class="ig-grid">
     """
@@ -194,19 +178,21 @@ def render_card_grid(sub_df: pd.DataFrame, fmt_fn) -> str:
         metric   = f"▶ {fmt_fn(row['videoPlayCount'])}" if row["content_type"] == "reel" else f"❤ {fmt_fn(row['likesCount'])}"
         comments = fmt_fn(row["commentsCount"])
         url      = str(row.get("url", ""))
-        link     = f'<a class="ig-link" href="{url}" target="_blank">📎 보기</a>' if url.startswith("http") else ""
 
-        # 브랜디드 콘텐츠 계정 표시
+        # 썸네일 — 클릭 시 인스타그램으로 이동
+        if thumb and thumb not in ("nan", ""):
+            if url.startswith("http"):
+                thumb_html = f'<a class="ig-thumb-link" href="{url}" target="_blank"><img src="{thumb}" loading="lazy" onerror="this.parentNode.innerHTML=\'<div class=ig-placeholder>🖼️</div>\'"></a>'
+            else:
+                thumb_html = f'<img style="width:100%;aspect-ratio:1;object-fit:cover;display:block;" src="{thumb}" loading="lazy" onerror="this.parentNode.innerHTML=\'<div class=ig-placeholder>🖼️</div>\'">'
+        else:
+            thumb_html = '<div class="ig-placeholder">🖼️</div>'
+
+        # 브랜디드 콘텐츠 표시
         coauthors    = str(row.get("coauthor_accounts", ""))
         branded_html = ""
         if coauthors and coauthors not in ("nan", ""):
             branded_html = f'<div class="ig-branded">🤝 {coauthors}</div>'
-
-        thumb_html = (
-            f'<img src="{thumb}" loading="lazy" onerror="this.parentNode.innerHTML=\'<div class=ig-placeholder>🖼️</div>\'">'
-            if thumb and thumb not in ("nan", "")
-            else '<div class="ig-placeholder">🖼️</div>'
-        )
 
         html += f"""
         <div class="ig-card">
@@ -220,7 +206,6 @@ def render_card_grid(sub_df: pd.DataFrame, fmt_fn) -> str:
                 <div class="ig-meta">{date_str} | {country}</div>
                 <div class="ig-user">@{username}</div>
                 <div class="ig-stats">{metric} &nbsp; 💬 {comments}</div>
-                {link}
             </div>
         </div>
         """

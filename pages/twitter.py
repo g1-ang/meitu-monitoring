@@ -84,14 +84,16 @@ def render_tweet_cards(sub_df):
     <style>
     .tw-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:8px; }
     @media(max-width:768px){ .tw-grid{ grid-template-columns:repeat(2,1fr); gap:8px; } }
-    .tw-card { background:var(--background-color,#fff); border:0.5px solid rgba(128,128,128,0.2); border-radius:12px; padding:12px; display:flex; flex-direction:column; gap:6px; }
-    .tw-card img { width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:8px; }
+    .tw-card { background:var(--background-color,#fff); border:0.5px solid rgba(128,128,128,0.2); border-radius:12px; overflow:hidden; display:flex; flex-direction:column; }
+    .tw-thumb-link { display:block; cursor:pointer; }
+    .tw-thumb-link img { width:100%; aspect-ratio:16/9; object-fit:cover; display:block; transition:opacity 0.15s; }
+    .tw-thumb-link:hover img { opacity:0.85; }
+    .tw-body { padding:10px 12px 12px; display:flex; flex-direction:column; gap:5px; }
     .tw-kw { display:inline-block; background:#E8F5FE; color:#1D9BF0; font-size:9px; font-weight:500; padding:1px 7px; border-radius:10px; }
     .tw-text { font-size:11px; line-height:1.6; color:var(--color-text-primary,#000); }
     .tw-handle { font-size:10px; color:#888; }
     .tw-date { font-size:10px; color:#aaa; }
     .tw-stats { display:flex; gap:10px; font-size:11px; color:#666; flex-wrap:wrap; }
-    .tw-link { font-size:10px; color:#1D9BF0; text-decoration:none; }
     </style>
     <div class="tw-grid">
     """
@@ -104,24 +106,35 @@ def render_tweet_cards(sub_df):
         handle   = str(row.get("author_handle", "-"))
         date_str = row["created_at"].strftime("%Y-%m-%d %H:%M") if pd.notna(row["created_at"]) else "-"
         url      = str(row.get("url", ""))
-        link     = f'<a class="tw-link" href="{url}" target="_blank">🔗 원문 보기</a>' if url.startswith("http") else ""
         img_url  = get_first_image(row)
-        img_html = f'<img src="{img_url}" onerror="this.style.display=\'none\'">' if img_url else ""
+
+        # 썸네일 — 이미지 있으면 클릭 시 트위터로 이동, 없으면 텍스트 카드
+        if img_url and url.startswith("http"):
+            thumb_html = f'<a class="tw-thumb-link" href="{url}" target="_blank"><img src="{img_url}" onerror="this.parentNode.style.display=\'none\'"></a>'
+        else:
+            thumb_html = ""
+
+        # 텍스트 클릭 시 트위터로 이동
+        if url.startswith("http"):
+            text_html = f'<a href="{url}" target="_blank" style="text-decoration:none;color:inherit;"><div class="tw-text">{text}</div></a>'
+        else:
+            text_html = f'<div class="tw-text">{text}</div>'
 
         cards_html += f"""
         <div class="tw-card">
-            {img_html}
-            <div><span class="tw-kw">#{keyword}</span></div>
-            <div class="tw-text">{text}</div>
-            <div class="tw-handle">@{handle}</div>
-            <div class="tw-date">{date_str}</div>
-            <div class="tw-stats">
-                <span>❤️ {fmt(row['like_count'])}</span>
-                <span>🔁 {fmt(row['retweet_count'])}</span>
-                <span>💬 {fmt(row['reply_count'])}</span>
-                <span>👁️ {fmt(row['view_count'])}</span>
+            {thumb_html}
+            <div class="tw-body">
+                <div><span class="tw-kw">#{keyword}</span></div>
+                {text_html}
+                <div class="tw-handle">@{handle}</div>
+                <div class="tw-date">{date_str}</div>
+                <div class="tw-stats">
+                    <span>❤️ {fmt(row['like_count'])}</span>
+                    <span>🔁 {fmt(row['retweet_count'])}</span>
+                    <span>💬 {fmt(row['reply_count'])}</span>
+                    <span>👁️ {fmt(row['view_count'])}</span>
+                </div>
             </div>
-            {link}
         </div>
         """
 
@@ -176,7 +189,7 @@ render_kpi(filtered)
 st.divider()
 
 st.subheader("📋 트윗 목록")
-st.caption("인게이지먼트(좋아요+리트윗+댓글) 기준 상위 50건 | 원문 보기 클릭 시 트위터로 이동")
+st.caption("인게이지먼트(좋아요+리트윗+댓글) 기준 상위 50건 | 썸네일/텍스트 클릭 시 트위터로 이동")
 
 tab_all, tab_meitu, tab_beautycam = st.tabs(["전체", "meitu / 메이투", "뷰티캠"])
 with tab_all:

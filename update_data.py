@@ -4,10 +4,10 @@ import pandas as pd
 from apify_client import ApifyClient
 from datetime import datetime
 
-APIFY_TOKEN   = os.getenv('APIFY_API_TOKEN')
-ACTOR_ID      = "apify/instagram-hashtag-scraper"
-OUTPUT_PATH   = "data/latest_monitoring.csv"
-COLLECT_MODE  = os.getenv('COLLECT_MODE', 'all')  # 'all' or 'brand'
+APIFY_TOKEN  = os.getenv('APIFY_API_TOKEN')
+ACTOR_ID     = "apify/instagram-hashtag-scraper"
+OUTPUT_PATH  = "data/latest_monitoring.csv"
+COLLECT_MODE = os.getenv('COLLECT_MODE', 'all')
 
 # ── 브랜드 해시태그 (주 2회 수집) ─────────────────────────────────────────────
 BRAND_KEYWORDS = [
@@ -19,11 +19,9 @@ CATEGORY_KEYWORDS = [
     "보정", "사진편집", "ai보정",
 ]
 
-# ── 브랜디드 콘텐츠 감지 대상 계정 ────────────────────────────────────────────
-BRANDED_ACCOUNTS = [
-    "meitu.kr", "meitu.app", "meitu.jp", "meitutw",
-    "beautycam.kr", "beautycam.app", "beautycam.jp",
-]
+# ── 브랜디드 콘텐츠 감지 키워드 ────────────────────────────────────────────────
+# username에 아래 키워드 중 하나라도 포함되면 is_branded = True
+BRANDED_KEYWORDS = ["meitu", "beautycam", "aicatch", "vivavideo"]
 
 
 def is_korean(text: str) -> bool:
@@ -46,16 +44,29 @@ def classify_content_type(row: pd.Series) -> str:
     return "unknown"
 
 
-def detect_branded_content(item: dict) -> bool:
+def detect_branded_content(item: dict) -> tuple:
+    """
+    브랜디드 콘텐츠 감지
+    - coauthorProducers username에 BRANDED_KEYWORDS 포함 여부
+    - 반환: (is_branded: bool, coauthor_accounts: str)
+    """
     coauthors = item.get("coauthorProducers", [])
     if not coauthors or not isinstance(coauthors, list):
-        return False
+        return False, ""
+
+    matched_accounts = []
+    is_branded       = False
+
     for author in coauthors:
         if isinstance(author, dict):
             username = str(author.get("username", "")).lower()
-            if any(acc in username for acc in BRANDED_ACCOUNTS):
-                return True
-    return False
+            if username:
+                matched_accounts.append(username)
+                # BRANDED_KEYWORDS 중 하나라도 포함되면 True
+                if any(kw in username for kw in BRANDED_KEYWORDS):
+                    is_branded = True
+
+    return is_branded, ", ".join(matched_accounts)
 
 
 def normalize(df: pd.DataFrame, raw_items: list) -> pd.DataFrame:
@@ -84,18 +95,14 @@ def normalize(df: pd.DataFrame, raw_items: list) -> pd.DataFrame:
     df["is_korean"]    = df.get("caption", "").apply(is_korean)
     df["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    branded_flags = [detect_branded_content(item) for item in raw_items]
-    df["is_branded"] = branded_flags if len(branded_flags) == len(df) else False
-
-    coauthor_names = []
-    for item in raw_items:
-        coauthors = item.get("coauthorProducers", [])
-        if coauthors and isinstance(coauthors, list):
-            names = [a.get("username", "") for a in coauthors if isinstance(a, dict)]
-            coauthor_names.append(", ".join(names))
-        else:
-            coauthor_names.append("")
-    df["coauthor_accounts"] = coauthor_names if len(coauthor_names) == len(df) else ""
+    # 브랜디드 콘텐츠 감지
+    branded_results = [detect_branded_content(item) for item in raw_items]
+    if len(branded_results) == len(df):
+        df["is_branded"]        = [r[0] for r in branded_results]
+        df["coauthor_accounts"] = [r[1] for r in branded_results]
+    else:
+        df["is_branded"]        = False
+        df["coauthor_accounts"] = ""
 
     return df
 
@@ -125,8 +132,7 @@ def append_and_dedup(new_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def collect(keyword: str, keyword_type: str, results_type: str, client) -> list:
-    """단일 키워드 수집"""
-    icon = "🏷️ " if keyword_type == "브랜드" else "📂"
+    icon = "🏷️" if keyword_type == "브랜드" else "📂"
     print(f"{icon} [{keyword_type}] #{keyword} [{results_type}] 수집 중...")
     run = client.actor(ACTOR_ID).call(run_input={
         "hashtags":      [keyword],
@@ -148,9 +154,6 @@ def fetch_data():
         all_results = []
 
         print(f"🚀 수집 모드: {COLLECT_MODE.upper()}")
-        print(f"   브랜드 키워드:   {BRAND_KEYWORDS}")
-        if COLLECT_MODE == "all":
-            print(f"   카테고리 키워드: {CATEGORY_KEYWORDS}")
 
         for results_type in ("posts", "reels"):
             # 브랜드 키워드 — 항상 수집

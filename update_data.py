@@ -19,9 +19,15 @@ CATEGORY_KEYWORDS = [
     "보정", "사진편집", "ai보정",
 ]
 
-# ── 브랜디드 콘텐츠 감지 키워드 ────────────────────────────────────────────────
-# username에 아래 키워드 중 하나라도 포함되면 is_branded = True
-BRANDED_KEYWORDS = ["meitu", "beautycam", "aicatch", "vivavideo"]
+# ── 공동게시자 경쟁사 키워드 (username에 포함되면 광고로 인식) ──────────────────
+COAUTHOR_BRAND_KEYWORDS = ["meitu", "beautycam", "aicatch", "vivavideo", "beautyplus"]
+
+# ── 캡션 광고 키워드 ────────────────────────────────────────────────────────────
+AD_CAPTION_KEYWORDS = [
+    "#광고", "#협찬", "#유료광고", "#유료_광고", "#ad", "#sponsored",
+    "#collaboration", "#collab", "#paid", "#pr", "#promotion",
+    "#파트너십", "#partnership", "#제공",
+]
 
 
 def is_korean(text: str) -> bool:
@@ -46,27 +52,45 @@ def classify_content_type(row: pd.Series) -> str:
 
 def detect_branded_content(item: dict) -> tuple:
     """
-    브랜디드 콘텐츠 감지
-    - coauthorProducers username에 BRANDED_KEYWORDS 포함 여부
-    - 반환: (is_branded: bool, coauthor_accounts: str)
+    광고 감지 — 아래 3가지 중 하나라도 해당하면 is_branded = True
+
+    1. paidPartnership == True
+       → 브랜디드 콘텐츠 설정 ("~과 협찬 광고입니다")
+
+    2. coauthorProducers 중 경쟁사 키워드 포함 계정
+       → meitu / beautycam / aicatch / vivavideo / beautyplus 포함 username
+
+    3. 캡션에 광고 키워드 포함
+       → #광고 #협찬 #ad #sponsored 등
     """
+    reasons           = []
+    coauthor_accounts = []
+
+    # 1) paidPartnership
+    paid = item.get("paidPartnership", False)
+    if paid and str(paid).lower() not in ("false", "none", "nan", ""):
+        reasons.append("paidPartnership")
+
+    # 2) coauthorProducers — 경쟁사 키워드 포함 계정만
     coauthors = item.get("coauthorProducers", [])
-    if not coauthors or not isinstance(coauthors, list):
-        return False, ""
+    if coauthors and isinstance(coauthors, list):
+        for author in coauthors:
+            if isinstance(author, dict):
+                username = str(author.get("username", "")).strip().lower()
+                if username:
+                    coauthor_accounts.append(username)
+                    if any(kw in username for kw in COAUTHOR_BRAND_KEYWORDS):
+                        reasons.append(f"coauthor:{username}")
 
-    matched_accounts = []
-    is_branded       = False
+    # 3) 캡션 광고 키워드
+    caption = str(item.get("caption", "")).lower()
+    for kw in AD_CAPTION_KEYWORDS:
+        if kw.lower() in caption:
+            reasons.append(f"caption:{kw}")
+            break
 
-    for author in coauthors:
-        if isinstance(author, dict):
-            username = str(author.get("username", "")).lower()
-            if username:
-                matched_accounts.append(username)
-                # BRANDED_KEYWORDS 중 하나라도 포함되면 True
-                if any(kw in username for kw in BRANDED_KEYWORDS):
-                    is_branded = True
-
-    return is_branded, ", ".join(matched_accounts)
+    is_branded = len(reasons) > 0
+    return is_branded, ", ".join(coauthor_accounts)
 
 
 def normalize(df: pd.DataFrame, raw_items: list) -> pd.DataFrame:
@@ -95,7 +119,7 @@ def normalize(df: pd.DataFrame, raw_items: list) -> pd.DataFrame:
     df["is_korean"]    = df.get("caption", "").apply(is_korean)
     df["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # 브랜디드 콘텐츠 감지
+    # 광고 감지
     branded_results = [detect_branded_content(item) for item in raw_items]
     if len(branded_results) == len(df):
         df["is_branded"]        = [r[0] for r in branded_results]
@@ -156,11 +180,8 @@ def fetch_data():
         print(f"🚀 수집 모드: {COLLECT_MODE.upper()}")
 
         for results_type in ("posts", "reels"):
-            # 브랜드 키워드 — 항상 수집
             for keyword in BRAND_KEYWORDS:
                 all_results.extend(collect(keyword, "브랜드", results_type, client))
-
-            # 카테고리 키워드 — 월요일(all 모드)만 수집
             if COLLECT_MODE == "all":
                 for keyword in CATEGORY_KEYWORDS:
                     all_results.extend(collect(keyword, "카테고리", results_type, client))

@@ -1,6 +1,7 @@
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+from datetime import datetime, timezone
 from utils import load_and_process, get_weekly_df, get_week_range, extract_keywords, fmt, TYPE_COLOR, TYPE_LABEL
 
 st.set_page_config(page_title="IG Summary", page_icon="📊", layout="wide")
@@ -26,6 +27,28 @@ def load_data():
     return df
 
 
+def get_comparison_weeks():
+    """
+    월~수 (0,1,2): 지난주 vs 지지난주
+    목~일 (3,4,5,6): 이번주 vs 지난주
+    """
+    now     = datetime.now(timezone.utc)
+    weekday = now.weekday()  # 0=월, 1=화, 2=수, 3=목, 4=금, 5=토, 6=일
+
+    if weekday in (0, 1, 2):  # 월~수
+        current_start, current_end = get_week_range(weeks_ago=1)
+        compare_start, compare_end = get_week_range(weeks_ago=2)
+        current_label = f"지난 주 ({current_start.strftime('%m/%d')} ~ {(current_end - pd.Timedelta(days=1)).strftime('%m/%d')})"
+        compare_label = f"지지난 주 ({compare_start.strftime('%m/%d')} ~ {(compare_end - pd.Timedelta(days=1)).strftime('%m/%d')})"
+    else:  # 목~일
+        current_start, current_end = get_week_range(weeks_ago=0)
+        compare_start, compare_end = get_week_range(weeks_ago=1)
+        current_label = f"이번 주 ({current_start.strftime('%m/%d')} ~ {(current_end - pd.Timedelta(days=1)).strftime('%m/%d')})"
+        compare_label = f"지난 주 ({compare_start.strftime('%m/%d')} ~ {(compare_end - pd.Timedelta(days=1)).strftime('%m/%d')})"
+
+    return current_start, current_end, compare_start, compare_end, current_label, compare_label
+
+
 def top_nav(current):
     col1, col2, col3, col4 = st.columns([1, 1, 1, 7])
     with col1:
@@ -46,14 +69,14 @@ def top_nav(current):
     st.markdown("<div style='margin-bottom:8px;'></div>", unsafe_allow_html=True)
 
 
-def render_kpi_bar(this_week, last_week):
+def render_kpi_bar(current_df, compare_df):
     metrics = [
-        ("📋 전체",   len(this_week),                                               len(last_week)),
-        ("🎬 릴스",   (this_week["content_type"]=="reel").sum(),                    (last_week["content_type"]=="reel").sum()),
-        ("🖼️ 피드",   this_week["content_type"].isin(["feed","video_feed"]).sum(),  last_week["content_type"].isin(["feed","video_feed"]).sum()),
-        ("🇰🇷 한국",  this_week["is_korean"].sum(),                                 last_week["is_korean"].sum()),
-        ("📢 광고",   (this_week["ad_type"]=="📢 광고").sum(),                      (last_week["ad_type"]=="📢 광고").sum()),
-        ("🌱 오가닉", (this_week["ad_type"]=="🌱 오가닉").sum(),                    (last_week["ad_type"]=="🌱 오가닉").sum()),
+        ("📋 전체",   len(current_df),                                              len(compare_df)),
+        ("🎬 릴스",   (current_df["content_type"]=="reel").sum(),                   (compare_df["content_type"]=="reel").sum()),
+        ("🖼️ 피드",   current_df["content_type"].isin(["feed","video_feed"]).sum(), compare_df["content_type"].isin(["feed","video_feed"]).sum()),
+        ("🇰🇷 한국",  current_df["is_korean"].sum(),                                compare_df["is_korean"].sum()),
+        ("📢 광고",   (current_df["ad_type"]=="📢 광고").sum(),                     (compare_df["ad_type"]=="📢 광고").sum()),
+        ("🌱 오가닉", (current_df["ad_type"]=="🌱 오가닉").sum(),                   (compare_df["ad_type"]=="🌱 오가닉").sum()),
     ]
     cols = st.columns(len(metrics))
     for col, (label, cur, prev) in zip(cols, metrics):
@@ -118,7 +141,7 @@ def render_keywords(df):
 def render_top5_cards(sub_df, metric_col):
     top = sub_df.nlargest(5, metric_col).reset_index(drop=True)
     if top.empty:
-        st.info("이번 주 데이터가 없습니다. 다음 수집 후 확인해주세요.")
+        st.info("해당 기간 데이터가 없습니다. 다음 수집 후 확인해주세요.")
         return
     type_colors = {"릴스": "#E1306C", "피드": "#405DE6", "피드(동영상)": "#833AB4"}
     cols = st.columns(5)
@@ -129,12 +152,11 @@ def render_top5_cards(sub_df, metric_col):
         with col:
             thumb = str(row.get("displayUrl", ""))
             url   = str(row.get("url", ""))
-            # 썸네일 클릭 시 인스타그램으로 이동
             if thumb and thumb not in ("nan", ""):
                 if url.startswith("http"):
                     st.markdown(
                         f'<a href="{url}" target="_blank">'
-                        f'<img src="{thumb}" style="width:100%;border-radius:8px;cursor:pointer;" onerror="this.style.display=\'none\'">'
+                        f'<img src="{thumb}" style="width:100%;border-radius:8px;cursor:pointer;">'
                         f'</a>',
                         unsafe_allow_html=True
                     )
@@ -158,9 +180,13 @@ def render_top5_cards(sub_df, metric_col):
                 unsafe_allow_html=True)
 
 
-def render_top5(brand_df, category_df):
-    st.subheader("🏆 이번 주 TOP 5")
-    st.caption("릴스: 조회수 기준 / 피드: 좋아요 기준 / 카테고리: 인게이지먼트 기준")
+def render_top5(current_df, label):
+    st.subheader("🏆 TOP 5")
+    st.caption(f"{label} 기준 | 릴스: 조회수 / 피드: 좋아요 / 카테고리: 인게이지먼트")
+
+    brand_df    = current_df[current_df["keyword_type"] == "브랜드"]
+    category_df = current_df[current_df["keyword_type"] == "카테고리"]
+
     tab_reel, tab_feed, tab_category = st.tabs([
         "🎬 경쟁사 릴스 TOP 5", "🖼️ 경쟁사 피드 TOP 5", "📂 카테고리 TOP 5",
     ])
@@ -187,25 +213,23 @@ filtered_df = df[df["country"].isin(sel_countries)] if sel_countries else df
 
 st.divider()
 
-this_start, this_end = get_week_range(weeks_ago=0)
-last_start, last_end = get_week_range(weeks_ago=1)
-this_week   = get_weekly_df(filtered_df, weeks_ago=0)
-last_week   = get_weekly_df(filtered_df, weeks_ago=1)
+current_start, current_end, compare_start, compare_end, current_label, compare_label = get_comparison_weeks()
 
-st.markdown(
-    f"**이번 주** {this_start.strftime('%m/%d')} ~ {(this_end - pd.Timedelta(days=1)).strftime('%m/%d')}"
-    f" &nbsp;vs&nbsp; "
-    f"**지난 주** {last_start.strftime('%m/%d')} ~ {(last_end - pd.Timedelta(days=1)).strftime('%m/%d')}"
-)
+current_df = filtered_df[
+    (filtered_df["timestamp"] >= current_start) &
+    (filtered_df["timestamp"] < current_end)
+]
+compare_df = filtered_df[
+    (filtered_df["timestamp"] >= compare_start) &
+    (filtered_df["timestamp"] < compare_end)
+]
 
-display_df  = this_week if not this_week.empty else filtered_df
-brand_df    = display_df[display_df["keyword_type"] == "브랜드"]
-category_df = display_df[display_df["keyword_type"] == "카테고리"]
+st.markdown(f"**{current_label}** &nbsp;vs&nbsp; **{compare_label}**")
 
-render_kpi_bar(display_df, last_week)
+render_kpi_bar(current_df, compare_df)
 st.divider()
 render_charts(filtered_df)
 st.divider()
 render_keywords(filtered_df)
 st.divider()
-render_top5(brand_df, category_df)
+render_top5(current_df if not current_df.empty else filtered_df, current_label)

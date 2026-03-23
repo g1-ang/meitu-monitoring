@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 from datetime import datetime, timezone
-from utils import load_and_process, get_weekly_df, get_week_range, extract_keywords, fmt, TYPE_COLOR, TYPE_LABEL
+from utils import load_and_process, get_week_range, extract_keywords, fmt, TYPE_COLOR, TYPE_LABEL
 
 st.set_page_config(page_title="IG Summary", page_icon="📊", layout="wide")
 
@@ -33,14 +33,14 @@ def get_comparison_weeks():
     목~일 (3,4,5,6): 이번주 vs 지난주
     """
     now     = datetime.now(timezone.utc)
-    weekday = now.weekday()  # 0=월, 1=화, 2=수, 3=목, 4=금, 5=토, 6=일
+    weekday = now.weekday()
 
-    if weekday in (0, 1, 2):  # 월~수
+    if weekday in (0, 1, 2):
         current_start, current_end = get_week_range(weeks_ago=1)
         compare_start, compare_end = get_week_range(weeks_ago=2)
         current_label = f"지난 주 ({current_start.strftime('%m/%d')} ~ {(current_end - pd.Timedelta(days=1)).strftime('%m/%d')})"
         compare_label = f"지지난 주 ({compare_start.strftime('%m/%d')} ~ {(compare_end - pd.Timedelta(days=1)).strftime('%m/%d')})"
-    else:  # 목~일
+    else:
         current_start, current_end = get_week_range(weeks_ago=0)
         compare_start, compare_end = get_week_range(weeks_ago=1)
         current_label = f"이번 주 ({current_start.strftime('%m/%d')} ~ {(current_end - pd.Timedelta(days=1)).strftime('%m/%d')})"
@@ -87,38 +87,34 @@ def render_kpi_bar(current_df, compare_df):
 
 
 def render_charts(df):
+    """콘텐츠 유형 + 광고 vs 오가닉 — 2개만"""
     cmap = {v: TYPE_COLOR.get(k, "#888") for k, v in TYPE_LABEL.items()}
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
+
     with col1:
         st.markdown("**콘텐츠 유형**")
         counts = df["type_label"].value_counts().reset_index()
         counts.columns = ["유형", "건수"]
-        fig = px.pie(counts, names="유형", values="건수", hole=0.45, color="유형", color_discrete_map=cmap)
+        fig = px.pie(counts, names="유형", values="건수", hole=0.45,
+                     color="유형", color_discrete_map=cmap)
         fig.update_traces(textposition="none")
         fig.update_layout(showlegend=True,
             legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5, font=dict(size=9)),
-            margin=dict(t=5, b=40, l=5, r=5), height=180)
+            margin=dict(t=5, b=40, l=5, r=5), height=200)
         st.plotly_chart(fig, use_container_width=True)
+
     with col2:
         st.markdown("**광고 vs 오가닉**")
         ad_counts = df["ad_type"].value_counts().reset_index()
         ad_counts.columns = ["유형", "건수"]
-        fig2 = px.pie(ad_counts, names="유형", values="건수", hole=0.45, color="유형",
+        fig2 = px.pie(ad_counts, names="유형", values="건수", hole=0.45,
+                      color="유형",
                       color_discrete_map={"📢 광고": "#FF6B00", "🌱 오가닉": "#2E7D32"})
         fig2.update_traces(textposition="none")
         fig2.update_layout(showlegend=True,
             legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5, font=dict(size=9)),
-            margin=dict(t=5, b=40, l=5, r=5), height=180)
+            margin=dict(t=5, b=40, l=5, r=5), height=200)
         st.plotly_chart(fig2, use_container_width=True)
-    with col3:
-        st.markdown("**국가별 분포**")
-        cc = df["country"].value_counts().reset_index()
-        cc.columns = ["국가", "건수"]
-        fig3 = px.bar(cc, x="국가", y="건수", labels={"국가": "", "건수": ""})
-        fig3.update_layout(showlegend=False,
-            margin=dict(t=5, b=5, l=5, r=5), height=180,
-            xaxis=dict(tickfont=dict(size=9)), yaxis=dict(tickfont=dict(size=9)))
-        st.plotly_chart(fig3, use_container_width=True)
 
 
 def render_keywords(df):

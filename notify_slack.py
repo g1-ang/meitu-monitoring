@@ -12,28 +12,28 @@ KEYWORD_THRESHOLD = 5
 REEL_VIEW_MIN = 5000
 FEED_LIKE_MIN = 100
 
-BRAND_KEYWORDS = ["meitu", "meitu", "beautycam", "beautycam"]
-AD_PATTERNS = ["", "", "", "", "", "",
+BRAND_KEYWORDS = ["meitu", "메이투", "뷰티캠", "beautycam"]
+AD_PATTERNS = ["광고", "협찬", "유료광고", "제공", "콜라보", "파트너십",
                "ad", "sponsored", "collaboration", "paid", "pr", "promotion"]
 
 DASHBOARD_URL = "https://meitu-monitoring.streamlit.app"
 DETAILS_URL = "https://meitu-monitoring.streamlit.app/details"
 
 TW_STOPWORDS = {
-    "meitu", "meitu", "beautycam", "beautycam", "beauty", "cam",
+    "meitu", "메이투", "뷰티캠", "beautycam", "beauty", "cam",
     "fyp", "foryou", "viral", "reels", "reel",
-    "",
+    "광고",
 }
 
 IG_STOPWORDS = {
-    "meitu", "meitu", "beautycam", "beautycam", "beauty", "cam",
+    "meitu", "메이투", "뷰티캠", "beautycam", "beauty", "cam",
     "fyp", "foryou", "viral", "reels", "reel", "love", "like",
     "follow", "share", "instagram", "insta", "photo", "video",
-    "", "", "", "", "", "",
+    "좋아요", "팔로우", "댓글", "공유", "인스타", "인스타그램",
 }
 
 
-# -- --
+# -- 유틸 --
 
 def send_slack(blocks: list):
     payload = json.dumps({"blocks": blocks}).encode("utf-8")
@@ -107,7 +107,7 @@ def delta_str(cur: int, prev: int) -> str:
     diff = cur - prev
     if diff > 0: return f"+{diff}건"
     if diff < 0: return f"{diff}건"
-    return "+-0건"
+    return "0건"
 
 
 # -- 기간 계산 --
@@ -129,7 +129,7 @@ def get_report_label() -> str:
     base = f"최근 7일 ({start.strftime('%m/%d')} ~ {now.strftime('%m/%d %H:%M')})"
     if weekday != 0:
         this_monday = (now - timedelta(days=weekday)).replace(hour=0, minute=0, second=0, microsecond=0)
-        base += f"  -  이번주 누적 ({this_monday.strftime('%m/%d')} ~ 현재)"
+        base += f" - 이번주 누적 ({this_monday.strftime('%m/%d')} ~ 현재)"
     return base
 
 
@@ -321,11 +321,12 @@ def notify_keyword_spike(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     ig_cur = filter_range(ig_df, "timestamp", start, end)
     tw_cur = filter_range(tw_df, "created_at", start, end) if not tw_df.empty else pd.DataFrame()
 
+    # 인스타: 브랜드 키워드 수집분만
     counter_ig = Counter()
-    if "caption" in ig_cur.columns:
+    if "caption" in ig_cur.columns and "search_keyword" in ig_cur.columns:
         ig_brand_kr = ig_cur[
-            ig_cur["caption"].apply(is_korean) &
-            (ig_cur["search_keyword"].isin(BRAND_KEYWORDS) if "search_keyword" in ig_cur.columns else True)
+            ig_cur["search_keyword"].isin(BRAND_KEYWORDS) &
+            ig_cur["caption"].apply(is_korean)
         ]
         for caption in ig_brand_kr["caption"].dropna():
             for tag in re.findall(r'#(\w+)', str(caption).lower()):
@@ -335,9 +336,10 @@ def notify_keyword_spike(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
                     continue
                 counter_ig[tag] += 1
 
+    # 트위터: 브랜드 키워드 수집분만 + 해시태그만
     counter_tw = Counter()
-    if not tw_cur.empty and "text" in tw_cur.columns:
-        tw_brand = tw_cur[tw_cur["search_keyword"].isin(BRAND_KEYWORDS)] if "search_keyword" in tw_cur.columns else tw_cur
+    if not tw_cur.empty and "text" in tw_cur.columns and "search_keyword" in tw_cur.columns:
+        tw_brand = tw_cur[tw_cur["search_keyword"].isin(BRAND_KEYWORDS)]
         for text in tw_brand["text"].dropna():
             for tag in re.findall(r'#(\w+)', str(text).lower()):
                 if tag not in TW_STOPWORDS and len(tag) >= 2:

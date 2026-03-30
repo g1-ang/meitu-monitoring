@@ -342,7 +342,8 @@ def notify_keyword_spike(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     now_kst   = datetime.now(timezone.utc) + timedelta(hours=9)
     start_kst = start + timedelta(hours=9)
 
-    ig_text = "  ".join([f"`#{k}` {v}건" for k, v in ig_top5]) if ig_top5 else "_해당 없음_"
+    # 인스타/트위터 모두 # 없이 키워드만 표시
+    ig_text = "  ".join([f"`{k}` {v}건" for k, v in ig_top5]) if ig_top5 else "_해당 없음_"
     tw_text = "  ".join([f"`{k}` {v}건" for k, v in tw_top5]) if tw_top5 else "_해당 없음_"
 
     blocks = [

@@ -12,28 +12,28 @@ KEYWORD_THRESHOLD = 5
 REEL_VIEW_MIN = 5000
 FEED_LIKE_MIN = 100
 
-BRAND_KEYWORDS = ["meitu", "메이투", "뷰티캠", "beautycam"]
-AD_PATTERNS = ["광고", "협찬", "유료광고", "제공", "콜라보", "파트너십",
+BRAND_KEYWORDS = ["meitu", "meitu", "beautycam", "beautycam"]
+AD_PATTERNS = ["", "", "", "", "", "",
                "ad", "sponsored", "collaboration", "paid", "pr", "promotion"]
 
 DASHBOARD_URL = "https://meitu-monitoring.streamlit.app"
 DETAILS_URL = "https://meitu-monitoring.streamlit.app/details"
 
 TW_STOPWORDS = {
-    "meitu", "메이투", "뷰티캠", "beautycam", "beauty", "cam",
+    "meitu", "meitu", "beautycam", "beautycam", "beauty", "cam",
     "fyp", "foryou", "viral", "reels", "reel",
-    "광고",
+    "",
 }
 
 IG_STOPWORDS = {
-    "meitu", "메이투", "뷰티캠", "beautycam", "beauty", "cam",
+    "meitu", "meitu", "beautycam", "beautycam", "beauty", "cam",
     "fyp", "foryou", "viral", "reels", "reel", "love", "like",
     "follow", "share", "instagram", "insta", "photo", "video",
-    "좋아요", "팔로우", "댓글", "공유", "인스타", "인스타그램",
+    "", "", "", "", "", "",
 }
 
 
-# ── 유틸 ──────────────────────────────────────────────────────────────────────
+# -- --
 
 def send_slack(blocks: list):
     payload = json.dumps({"blocks": blocks}).encode("utf-8")
@@ -107,10 +107,10 @@ def delta_str(cur: int, prev: int) -> str:
     diff = cur - prev
     if diff > 0: return f"+{diff}건"
     if diff < 0: return f"{diff}건"
-    return "±0건"
+    return "+-0건"
 
 
-# ── 기간 계산 ─────────────────────────────────────────────────────────────────
+# -- 기간 계산 --
 
 def get_rolling_7days():
     now = datetime.now(timezone.utc)
@@ -129,7 +129,7 @@ def get_report_label() -> str:
     base = f"최근 7일 ({start.strftime('%m/%d')} ~ {now.strftime('%m/%d %H:%M')})"
     if weekday != 0:
         this_monday = (now - timedelta(days=weekday)).replace(hour=0, minute=0, second=0, microsecond=0)
-        base += f"  ·  이번주 누적 ({this_monday.strftime('%m/%d')} ~ 현재)"
+        base += f"  -  이번주 누적 ({this_monday.strftime('%m/%d')} ~ 현재)"
     return base
 
 
@@ -143,13 +143,13 @@ def filter_range(df: pd.DataFrame, date_col: str, start, end) -> pd.DataFrame:
     return df[(df[date_col] >= start) & (df[date_col] < end)].copy()
 
 
-# ── 인스타 TOP3 블록 ──────────────────────────────────────────────────────────
+# -- 인스타 TOP3 블록 --
 
 def format_caption_ig(text: str, max_len: int = 55) -> str:
     if not text or str(text) in ("nan", ""):
         return ""
     first_line = str(text).replace("\n", " ").strip()
-    return first_line[:max_len] + "…" if len(first_line) > max_len else first_line
+    return first_line[:max_len] + "..." if len(first_line) > max_len else first_line
 
 
 def build_ig_top3_blocks(df_kr: pd.DataFrame) -> list:
@@ -161,9 +161,9 @@ def build_ig_top3_blocks(df_kr: pd.DataFrame) -> list:
     reels_filtered = reels[reels["videoPlayCount"] >= REEL_VIEW_MIN].nlargest(3, "videoPlayCount")
     if reels_filtered.empty:
         reels_filtered = reels.nlargest(3, "videoPlayCount")
-        reel_header = "*릴스 TOP 3* (최근 7일 · 조건 완화 적용)"
+        reel_header = "*릴스 TOP 3* (최근 7일 - 조건 완화 적용)"
     else:
-        reel_header = f"*릴스 TOP 3* (조회수 {fmt(REEL_VIEW_MIN)} 이상 · 최근 7일)"
+        reel_header = f"*릴스 TOP 3* (조회수 {fmt(REEL_VIEW_MIN)} 이상 - 최근 7일)"
 
     reel_lines = []
     for i, (_, row) in enumerate(reels_filtered.iterrows(), 1):
@@ -181,9 +181,9 @@ def build_ig_top3_blocks(df_kr: pd.DataFrame) -> list:
     feeds_filtered = feeds[feeds["likesCount"] >= FEED_LIKE_MIN].nlargest(3, "likesCount")
     if feeds_filtered.empty:
         feeds_filtered = feeds.nlargest(3, "likesCount")
-        feed_header = "*피드 TOP 3* (최근 7일 · 조건 완화 적용)"
+        feed_header = "*피드 TOP 3* (최근 7일 - 조건 완화 적용)"
     else:
-        feed_header = f"*피드 TOP 3* (좋아요 {fmt(FEED_LIKE_MIN)} 이상 · 최근 7일)"
+        feed_header = f"*피드 TOP 3* (좋아요 {fmt(FEED_LIKE_MIN)} 이상 - 최근 7일)"
 
     feed_lines = []
     for i, (_, row) in enumerate(feeds_filtered.iterrows(), 1):
@@ -199,13 +199,13 @@ def build_ig_top3_blocks(df_kr: pd.DataFrame) -> list:
     return blocks
 
 
-# ── 트위터 TOP 블록 ───────────────────────────────────────────────────────────
+# -- 트위터 TOP 블록 --
 
 def format_caption_tw(text: str, max_len: int = 60) -> str:
     if not text or str(text) in ("nan", ""):
         return ""
     first_line = str(text).replace("\n", " ").strip()
-    return first_line[:max_len] + "…" if len(first_line) > max_len else first_line
+    return first_line[:max_len] + "..." if len(first_line) > max_len else first_line
 
 
 def build_tw_top_blocks(df_tw: pd.DataFrame) -> list:
@@ -244,15 +244,15 @@ def build_tw_top_blocks(df_tw: pd.DataFrame) -> list:
             caption = format_caption_tw(str(row.get("text", "")))
             caption_line = f"\n> _{caption}_" if caption else ""
             ad_lines.append(
-                f"@{row.get('author_handle', '-')} | 좋아요 {fmt(row['like_count'])} · 리트윗 {fmt(row['retweet_count'])}{caption_line}\n{row.get('url', '')}"
+                f"@{row.get('author_handle', '-')} | 좋아요 {fmt(row['like_count'])} - 리트윗 {fmt(row['retweet_count'])}{caption_line}\n{row.get('url', '')}"
             )
         blocks.append({"type": "section", "text": {"type": "mrkdwn",
-            "text": "*광고 언급 트윗* (광고·협찬·sponsored 표현 포함)\n" + "\n".join(ad_lines)}})
+            "text": "*광고 언급 트윗* (광고/협찬/sponsored 표현 포함)\n" + "\n".join(ad_lines)}})
 
     return blocks
 
 
-# ── 주간 리포트 ───────────────────────────────────────────────────────────────
+# -- 주간 리포트 --
 
 def notify_weekly_report(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
@@ -287,10 +287,10 @@ def notify_weekly_report(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": f"Meitu 주간 리포트 ({get_day_label()})", "emoji": True}},
         {"type": "context", "elements": [{"type": "mrkdwn",
-            "text": f"발송: *{now_kst.strftime('%Y-%m-%d %H:%M')} KST* | 기간: {get_report_label()} | 한국 · 경쟁사 키워드 기준"}]},
+            "text": f"발송: *{now_kst.strftime('%Y-%m-%d %H:%M')} KST* | 기간: {get_report_label()} | 한국 - 경쟁사 키워드 기준"}]},
         {"type": "divider"},
         {"type": "section", "text": {"type": "mrkdwn", "text": (
-            f"*인스타그램 (한국 · 경쟁사)*\n"
+            f"*인스타그램 (한국 - 경쟁사)*\n"
             f"릴스: *{cur_reel}건* ({delta_str(cur_reel, prev_reel)}) | "
             f"피드: *{cur_feed}건* ({delta_str(cur_feed, prev_feed)})"
         )}},
@@ -298,7 +298,7 @@ def notify_weekly_report(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     blocks += build_ig_top3_blocks(ig_cur_kr)
     blocks.append({"type": "divider"})
     blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": (
-        f"*트위터 (한국 · 경쟁사)*\n"
+        f"*트위터 (한국 - 경쟁사)*\n"
         f"meitu+메이투: *{cur_meitu}건* ({delta_str(cur_meitu, prev_meitu)}) | "
         f"뷰티캠: *{cur_beauty}건* ({delta_str(cur_beauty, prev_beauty)})"
     )}})
@@ -314,14 +314,13 @@ def notify_weekly_report(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     print(f"주간 리포트 전송 완료 ({get_day_label()})")
 
 
-# ── 키워드 급증 알람 ──────────────────────────────────────────────────────────
+# -- 키워드 급증 알람 --
 
 def notify_keyword_spike(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     start, end = get_rolling_7days()
     ig_cur = filter_range(ig_df, "timestamp", start, end)
     tw_cur = filter_range(tw_df, "created_at", start, end) if not tw_df.empty else pd.DataFrame()
 
-    # 인스타: 브랜드 키워드 수집분만 + 한국어 캡션
     counter_ig = Counter()
     if "caption" in ig_cur.columns:
         ig_brand_kr = ig_cur[
@@ -336,7 +335,6 @@ def notify_keyword_spike(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
                     continue
                 counter_ig[tag] += 1
 
-    # 트위터: 브랜드 키워드 수집분만 + 해시태그만
     counter_tw = Counter()
     if not tw_cur.empty and "text" in tw_cur.columns:
         tw_brand = tw_cur[tw_cur["search_keyword"].isin(BRAND_KEYWORDS)] if "search_keyword" in tw_cur.columns else tw_cur
@@ -361,7 +359,7 @@ def notify_keyword_spike(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": "키워드 급증 감지!", "emoji": True}},
         {"type": "context", "elements": [{"type": "mrkdwn",
-            "text": f"기준: 한국 · *경쟁사 브랜드 키워드* 캡션 | {KEYWORD_THRESHOLD}건 이상 | 최근 7일 ({start_kst.strftime('%m/%d')} ~ {now_kst.strftime('%m/%d %H:%M')} KST)"}]},
+            "text": f"기준: 한국 - 경쟁사 브랜드 키워드 캡션 | {KEYWORD_THRESHOLD}건 이상 | 최근 7일 ({start_kst.strftime('%m/%d')} ~ {now_kst.strftime('%m/%d %H:%M')} KST)"}]},
         {"type": "divider"},
         {"type": "section", "text": {"type": "mrkdwn", "text": f"*인스타그램*\n{ig_text}"}},
         {"type": "section", "text": {"type": "mrkdwn", "text": f"*트위터* _(해시태그 기준)_\n{tw_text}"}},
@@ -375,7 +373,7 @@ def notify_keyword_spike(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     print("키워드 급증 알람 전송 완료")
 
 
-# ── 메인 ─────────────────────────────────────────────────────────────────────
+# -- 메인 --
 
 def main():
     print("슬랙 알람 전송 시작...")
@@ -388,15 +386,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```
-
-키워드 알람이 이렇게 바뀌어요:
-```
-키워드 급증 감지!
-기준: 한국 · 경쟁사 브랜드 키워드 캡션 | 5건 이상 | 최근 7일
-
-인스타그램
-`#보정` 29건  `#ai보정` 11건  `#벚꽃` 17건  `#벚꽃사진` 7건  `#사진편집` 6건
-
-트위터 (해시태그 기준)
-`#행인제거` 7건  `#벚꽃사진` 7건

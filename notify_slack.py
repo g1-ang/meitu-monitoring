@@ -322,53 +322,49 @@ def notify_keyword_spike(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     tw_cur = filter_range(tw_df, "created_at", start, end) if not tw_df.empty else pd.DataFrame()
 
     # 인스타: 브랜드 키워드 수집분만 + 한국어 캡션
-    ig_spike_lines = []
+    counter_ig = Counter()
     if "caption" in ig_cur.columns:
         ig_brand_kr = ig_cur[
             ig_cur["caption"].apply(is_korean) &
             (ig_cur["search_keyword"].isin(BRAND_KEYWORDS) if "search_keyword" in ig_cur.columns else True)
         ]
-        counter = Counter()
         for caption in ig_brand_kr["caption"].dropna():
             for tag in re.findall(r'#(\w+)', str(caption).lower()):
                 if tag in IG_STOPWORDS or len(tag) < 2:
                     continue
-                if re.fullmatch(r'\d+', tag):  # 날짜형 태그 제거 (#20260321 등)
+                if re.fullmatch(r'\d+', tag):
                     continue
-                counter[tag] += 1
-        ig_spike_lines = [f"• *#{k}* — {v}건"
-                          for k, v in sorted(counter.items(), key=lambda x: -x[1])
-                          if v >= KEYWORD_THRESHOLD]
+                counter_ig[tag] += 1
 
     # 트위터: 브랜드 키워드 수집분만 + 해시태그만
-    tw_spike_lines = []
+    counter_tw = Counter()
     if not tw_cur.empty and "text" in tw_cur.columns:
         tw_brand = tw_cur[tw_cur["search_keyword"].isin(BRAND_KEYWORDS)] if "search_keyword" in tw_cur.columns else tw_cur
-        counter = Counter()
         for text in tw_brand["text"].dropna():
             for tag in re.findall(r'#(\w+)', str(text).lower()):
                 if tag not in TW_STOPWORDS and len(tag) >= 2:
-                    counter[tag] += 1
-        tw_spike_lines = [f"• *#{k}* — {v}건"
-                          for k, v in sorted(counter.items(), key=lambda x: -x[1])
-                          if v >= KEYWORD_THRESHOLD]
+                    counter_tw[tag] += 1
 
-    if not ig_spike_lines and not tw_spike_lines:
+    ig_top5 = [(k, v) for k, v in sorted(counter_ig.items(), key=lambda x: -x[1]) if v >= KEYWORD_THRESHOLD][:5]
+    tw_top5 = [(k, v) for k, v in sorted(counter_tw.items(), key=lambda x: -x[1]) if v >= KEYWORD_THRESHOLD][:5]
+
+    if not ig_top5 and not tw_top5:
         print("키워드 급증 없음")
         return
 
     now_kst   = datetime.now(timezone.utc) + timedelta(hours=9)
     start_kst = start + timedelta(hours=9)
 
+    ig_text = "  ".join([f"`#{k}` {v}건" for k, v in ig_top5]) if ig_top5 else "_해당 없음_"
+    tw_text = "  ".join([f"`#{k}` {v}건" for k, v in tw_top5]) if tw_top5 else "_해당 없음_"
+
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": "키워드 급증 감지!", "emoji": True}},
         {"type": "context", "elements": [{"type": "mrkdwn",
             "text": f"기준: 한국 · *경쟁사 브랜드 키워드* 캡션 | {KEYWORD_THRESHOLD}건 이상 | 최근 7일 ({start_kst.strftime('%m/%d')} ~ {now_kst.strftime('%m/%d %H:%M')} KST)"}]},
         {"type": "divider"},
-        {"type": "section", "text": {"type": "mrkdwn",
-            "text": "*인스타그램*\n" + ("\n".join(ig_spike_lines) if ig_spike_lines else "_해당 없음_")}},
-        {"type": "section", "text": {"type": "mrkdwn",
-            "text": "*트위터* _(해시태그 기준)_\n" + ("\n".join(tw_spike_lines) if tw_spike_lines else "_해당 없음_")}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"*인스타그램*\n{ig_text}"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"*트위터* _(해시태그 기준)_\n{tw_text}"}},
         {"type": "divider"},
         {"type": "actions", "elements": [{"type": "button",
             "text": {"type": "plain_text", "text": "세부 페이지 보기", "emoji": True},
@@ -392,3 +388,15 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
+
+키워드 알람이 이렇게 바뀌어요:
+```
+키워드 급증 감지!
+기준: 한국 · 경쟁사 브랜드 키워드 캡션 | 5건 이상 | 최근 7일
+
+인스타그램
+`#보정` 29건  `#ai보정` 11건  `#벚꽃` 17건  `#벚꽃사진` 7건  `#사진편집` 6건
+
+트위터 (해시태그 기준)
+`#행인제거` 7건  `#벚꽃사진` 7건

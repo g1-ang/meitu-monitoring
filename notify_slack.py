@@ -9,8 +9,8 @@ from datetime import datetime, timedelta, timezone
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 
 KEYWORD_THRESHOLD = 5
-REEL_VIEW_MIN = 5000   # 완화: 1만 → 5천
-FEED_LIKE_MIN = 100    # 완화: 500 → 100
+REEL_VIEW_MIN = 5000
+FEED_LIKE_MIN = 100
 
 BRAND_KEYWORDS = ["meitu", "메이투", "뷰티캠", "beautycam"]
 AD_PATTERNS = ["광고", "협찬", "유료광고", "제공", "콜라보", "파트너십",
@@ -19,13 +19,12 @@ AD_PATTERNS = ["광고", "협찬", "유료광고", "제공", "콜라보", "파�
 DASHBOARD_URL = "https://meitu-monitoring.streamlit.app"
 DETAILS_URL = "https://meitu-monitoring.streamlit.app/details"
 
-# 트위터 불용어: 해시태그만 보도록 최소화 (마케팅 키워드 파악용)
 TW_STOPWORDS = {
     "meitu", "메이투", "뷰티캠", "beautycam", "beauty", "cam",
     "fyp", "foryou", "viral", "reels", "reel",
+    "광고",
 }
 
-# 인스타 불용어
 IG_STOPWORDS = {
     "meitu", "메이투", "뷰티캠", "beautycam", "beauty", "cam",
     "fyp", "foryou", "viral", "reels", "reel", "love", "like",
@@ -53,6 +52,10 @@ def load_instagram() -> pd.DataFrame:
     for col in ("likesCount", "commentsCount", "videoPlayCount"):
         df[col] = pd.to_numeric(df.get(col, 0), errors="coerce").fillna(0).astype(int)
     df["timestamp"] = pd.to_datetime(df.get("timestamp", ""), errors="coerce", utc=True)
+    if "caption" in df.columns:
+        df["caption"] = df["caption"].apply(
+            lambda x: "" if "비공개" in str(x) else x
+        )
     if "content_type" not in df.columns:
         df["content_type"] = df.apply(classify_content_type, axis=1)
     return df
@@ -110,13 +113,11 @@ def delta_str(cur: int, prev: int) -> str:
 # ── 기간 계산 ─────────────────────────────────────────────────────────────────
 
 def get_rolling_7days():
-    """최근 7일 (rolling window)"""
     now = datetime.now(timezone.utc)
     return now - timedelta(days=7), now
 
 
 def get_prev_7days():
-    """비교용: 7~14일 전"""
     now = datetime.now(timezone.utc)
     return now - timedelta(days=14), now - timedelta(days=7)
 
@@ -208,7 +209,6 @@ def format_caption_tw(text: str, max_len: int = 60) -> str:
 
 
 def build_tw_top_blocks(df_tw: pd.DataFrame) -> list:
-    """좋아요 TOP3 / 리트윗 TOP3 — 캡션 미리보기 포함, 조건 없음"""
     if df_tw.empty:
         return [{"type": "section", "text": {"type": "mrkdwn", "text": "_데이터 없음_"}}]
 
@@ -229,17 +229,14 @@ def build_tw_top_blocks(df_tw: pd.DataFrame) -> list:
 
     blocks = []
 
-    # 좋아요 TOP 3
     like_lines = build_top3_lines(df_brand.nlargest(3, "like_count"), "like_count", "좋아요")
     blocks.append({"type": "section", "text": {"type": "mrkdwn",
         "text": "*좋아요 TOP 3* (최근 7일)\n" + ("\n".join(like_lines) if like_lines else "_해당 없음_")}})
 
-    # 리트윗 TOP 3
     rt_lines = build_top3_lines(df_brand.nlargest(3, "retweet_count"), "retweet_count", "리트윗")
     blocks.append({"type": "section", "text": {"type": "mrkdwn",
         "text": "*리트윗 TOP 3* (최근 7일)\n" + ("\n".join(rt_lines) if rt_lines else "_해당 없음_")}})
 
-    # 광고 언급 트윗
     ad_tweets = df_brand[df_brand["text"].apply(is_ad)] if "text" in df_brand.columns else pd.DataFrame()
     if not ad_tweets.empty:
         ad_lines = []
@@ -282,8 +279,8 @@ def notify_weekly_report(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     def tw_cnt(df, kws):
         return len(df[df["search_keyword"].isin(kws)]) if not df.empty and "search_keyword" in df.columns else 0
 
-    cur_meitu  = tw_cnt(tw_cur,  ["meitu", "메이투"])
-    prev_meitu = tw_cnt(tw_prev, ["meitu", "메이투"])
+    cur_meitu   = tw_cnt(tw_cur,  ["meitu", "메이투"])
+    prev_meitu  = tw_cnt(tw_prev, ["meitu", "메이투"])
     cur_beauty  = tw_cnt(tw_cur,  ["뷰티캠"])
     prev_beauty = tw_cnt(tw_prev, ["뷰티캠"])
 
@@ -324,23 +321,31 @@ def notify_keyword_spike(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     ig_cur = filter_range(ig_df, "timestamp", start, end)
     tw_cur = filter_range(tw_df, "created_at", start, end) if not tw_df.empty else pd.DataFrame()
 
-    # 인스타: 해시태그 + 일반 단어
+    # 인스타: 브랜드 키워드 수집분만 + 한국어 캡션
     ig_spike_lines = []
     if "caption" in ig_cur.columns:
+        ig_brand_kr = ig_cur[
+            ig_cur["caption"].apply(is_korean) &
+            (ig_cur["search_keyword"].isin(BRAND_KEYWORDS) if "search_keyword" in ig_cur.columns else True)
+        ]
         counter = Counter()
-        for caption in ig_cur[ig_cur["caption"].apply(is_korean)]["caption"].dropna():
+        for caption in ig_brand_kr["caption"].dropna():
             for tag in re.findall(r'#(\w+)', str(caption).lower()):
-                if tag not in IG_STOPWORDS and len(tag) >= 2:
-                    counter[tag] += 1
+                if tag in IG_STOPWORDS or len(tag) < 2:
+                    continue
+                if re.fullmatch(r'\d+', tag):  # 날짜형 태그 제거 (#20260321 등)
+                    continue
+                counter[tag] += 1
         ig_spike_lines = [f"• *#{k}* — {v}건"
                           for k, v in sorted(counter.items(), key=lambda x: -x[1])
                           if v >= KEYWORD_THRESHOLD]
 
-    # 트위터: 해시태그만 (범용어 자연 제거)
+    # 트위터: 브랜드 키워드 수집분만 + 해시태그만
     tw_spike_lines = []
     if not tw_cur.empty and "text" in tw_cur.columns:
+        tw_brand = tw_cur[tw_cur["search_keyword"].isin(BRAND_KEYWORDS)] if "search_keyword" in tw_cur.columns else tw_cur
         counter = Counter()
-        for text in tw_cur["text"].dropna():
+        for text in tw_brand["text"].dropna():
             for tag in re.findall(r'#(\w+)', str(text).lower()):
                 if tag not in TW_STOPWORDS and len(tag) >= 2:
                     counter[tag] += 1
@@ -358,7 +363,7 @@ def notify_keyword_spike(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": "키워드 급증 감지!", "emoji": True}},
         {"type": "context", "elements": [{"type": "mrkdwn",
-            "text": f"기준: 한국 콘텐츠 캡션 | {KEYWORD_THRESHOLD}건 이상 | 최근 7일 ({start_kst.strftime('%m/%d')} ~ {now_kst.strftime('%m/%d %H:%M')} KST)"}]},
+            "text": f"기준: 한국 · *경쟁사 브랜드 키워드* 캡션 | {KEYWORD_THRESHOLD}건 이상 | 최근 7일 ({start_kst.strftime('%m/%d')} ~ {now_kst.strftime('%m/%d %H:%M')} KST)"}]},
         {"type": "divider"},
         {"type": "section", "text": {"type": "mrkdwn",
             "text": "*인스타그램*\n" + ("\n".join(ig_spike_lines) if ig_spike_lines else "_해당 없음_")}},

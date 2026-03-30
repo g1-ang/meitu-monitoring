@@ -34,8 +34,6 @@ IG_STOPWORDS = {
 }
 
 
-# -- 유틸 --
-
 def send_slack(blocks: list):
     payload = json.dumps({"blocks": blocks}).encode("utf-8")
     req = urllib.request.Request(
@@ -111,8 +109,6 @@ def delta_str(cur: int, prev: int) -> str:
     return "0건"
 
 
-# -- 기간 계산 --
-
 def get_rolling_7days():
     now = datetime.now(timezone.utc)
     return now - timedelta(days=7), now
@@ -144,8 +140,6 @@ def filter_range(df: pd.DataFrame, date_col: str, start, end) -> pd.DataFrame:
     return df[(df[date_col] >= start) & (df[date_col] < end)].copy()
 
 
-# -- 인스타 TOP3 블록 --
-
 def format_caption_ig(text: str, max_len: int = 55) -> str:
     if not text or str(text) in ("nan", ""):
         return ""
@@ -157,7 +151,6 @@ def build_ig_top3_blocks(df_kr: pd.DataFrame) -> list:
     blocks = []
     df_brand = df_kr[df_kr["search_keyword"].isin(BRAND_KEYWORDS)] if "search_keyword" in df_kr.columns else df_kr
 
-    # 릴스 TOP3
     reels = df_brand[df_brand["content_type"] == "reel"].copy()
     reels_filtered = reels[reels["videoPlayCount"] >= REEL_VIEW_MIN].nlargest(3, "videoPlayCount")
     if reels_filtered.empty:
@@ -173,11 +166,9 @@ def build_ig_top3_blocks(df_kr: pd.DataFrame) -> list:
         reel_lines.append(
             f"*{i}위* @{row.get('ownerUsername', '-')} | 조회수 {fmt(row['videoPlayCount'])}{caption_line}\n{row.get('url', '')}"
         )
-
     blocks.append({"type": "section", "text": {"type": "mrkdwn",
         "text": reel_header + "\n" + ("\n".join(reel_lines) if reel_lines else "_해당 콘텐츠 없음_")}})
 
-    # 피드 TOP3
     feeds = df_brand[df_brand["content_type"].isin(["feed", "video_feed"])].copy()
     feeds_filtered = feeds[feeds["likesCount"] >= FEED_LIKE_MIN].nlargest(3, "likesCount")
     if feeds_filtered.empty:
@@ -193,14 +184,11 @@ def build_ig_top3_blocks(df_kr: pd.DataFrame) -> list:
         feed_lines.append(
             f"*{i}위* @{row.get('ownerUsername', '-')} | 좋아요 {fmt(row['likesCount'])}{caption_line}\n{row.get('url', '')}"
         )
-
     blocks.append({"type": "section", "text": {"type": "mrkdwn",
         "text": feed_header + "\n" + ("\n".join(feed_lines) if feed_lines else "_해당 콘텐츠 없음_")}})
 
     return blocks
 
-
-# -- 트위터 TOP 블록 --
 
 def format_caption_tw(text: str, max_len: int = 60) -> str:
     if not text or str(text) in ("nan", ""):
@@ -252,8 +240,6 @@ def build_tw_top_blocks(df_tw: pd.DataFrame) -> list:
 
     return blocks
 
-
-# -- 주간 리포트 --
 
 def notify_weekly_report(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
@@ -315,14 +301,11 @@ def notify_weekly_report(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     print(f"주간 리포트 전송 완료 ({get_day_label()})")
 
 
-# -- 키워드 급증 알람 --
-
 def notify_keyword_spike(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     start, end = get_rolling_7days()
     ig_cur = filter_range(ig_df, "timestamp", start, end)
     tw_cur = filter_range(tw_df, "created_at", start, end) if not tw_df.empty else pd.DataFrame()
 
-    # 인스타: 브랜드 키워드 수집분 + 해시태그만
     counter_ig = Counter()
     if "caption" in ig_cur.columns and "search_keyword" in ig_cur.columns:
         ig_brand_kr = ig_cur[
@@ -337,17 +320,14 @@ def notify_keyword_spike(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
                     continue
                 counter_ig[tag] += 1
 
-    # 트위터: 브랜드 키워드 수집분 + 해시태그 & 일반 키워드 모두
     counter_tw = Counter()
     if not tw_cur.empty and "text" in tw_cur.columns and "search_keyword" in tw_cur.columns:
         tw_brand = tw_cur[tw_cur["search_keyword"].isin(BRAND_KEYWORDS)]
         for text in tw_brand["text"].dropna():
             t = str(text).lower()
-            # 해시태그
             for tag in re.findall(r'#(\w+)', t):
                 if tag not in TW_STOPWORDS and len(tag) >= 2:
                     counter_tw[tag] += 1
-            # 일반 한글 키워드 (2글자 이상)
             for word in re.findall(r'[가-힣]{2,}', t):
                 if word not in TW_STOPWORDS and len(word) >= 2:
                     counter_tw[word] += 1
@@ -382,8 +362,6 @@ def notify_keyword_spike(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     print("키워드 급증 알람 전송 완료")
 
 
-# -- 메인 --
-
 def main():
     print("슬랙 알람 전송 시작...")
     ig_df = load_instagram()
@@ -395,9 +373,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```
-
-트위터 키워드 알람 예시로는 이렇게 뜰 거예요:
-```
-트위터 (해시태그 + 키워드 기준)
-`행인제거` 7건  `벚꽃사진` 7건  `보정` 6건  `필터` 5건

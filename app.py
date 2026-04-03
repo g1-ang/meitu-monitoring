@@ -1,6 +1,4 @@
 import os
-import json
-import urllib.request
 import pandas as pd
 import streamlit as st
 import plotly.express as px
@@ -28,50 +26,6 @@ def load_data():
             axis=1
         )
     return df
-
-
-@st.cache_data(ttl=300)
-def load_apify_usage():
-    try:
-        token = st.secrets.get("APIFY_API_TOKEN", "") or os.getenv("APIFY_API_TOKEN", "")
-    except Exception:
-        token = os.getenv("APIFY_API_TOKEN", "")
-
-    if not token:
-        return None
-    try:
-        now = datetime.now(timezone.utc)
-
-        if now < datetime(2026, 4, 18, tzinfo=timezone.utc):
-            cycle_start = datetime(2026, 4, 3, 0, 0, 0, tzinfo=timezone.utc)
-            cycle_end = datetime(2026, 4, 17, 23, 59, 59, tzinfo=timezone.utc)
-        else:
-            if now.day >= 18:
-                cycle_start = now.replace(day=18, hour=0, minute=0, second=0, microsecond=0)
-            else:
-                if now.month == 1:
-                    cycle_start = now.replace(year=now.year - 1, month=12, day=18, hour=0, minute=0, second=0, microsecond=0)
-                else:
-                    cycle_start = now.replace(month=now.month - 1, day=18, hour=0, minute=0, second=0, microsecond=0)
-            if cycle_start.month == 12:
-                cycle_end = cycle_start.replace(year=cycle_start.year + 1, month=1, day=17)
-            else:
-                cycle_end = cycle_start.replace(month=cycle_start.month + 1, day=17)
-
-        # createdFrom 파라미터로 날짜 필터링
-        created_from = cycle_start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        url = f"https://api.apify.com/v2/actor-runs?token={token}&limit=500&createdFrom={created_from}"
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=5) as res:
-            data = json.loads(res.read())
-
-        runs = data.get("data", {}).get("items", [])
-        total_usd = sum(r.get("usageTotalUsd", 0) or 0 for r in runs)
-        cycle_label = f"{cycle_start.strftime('%m/%d')} ~ {cycle_end.strftime('%m/%d')}"
-        return {"usd": total_usd, "label": cycle_label}
-    except Exception as e:
-        st.write("Apify 에러:", str(e))
-        return None
 
 
 def get_comparison_weeks():
@@ -239,10 +193,6 @@ st.markdown("## 📊 Meitu 모니터링 - 요약")
 if df["last_updated"].notna().any():
     last_kst = df["last_updated"].max() + pd.Timedelta(hours=9)
     st.caption(f"마지막 수집: **{last_kst.strftime('%Y-%m-%d %H:%M')} KST** | 누적: **{len(df):,}건**")
-
-usage = load_apify_usage()
-if usage:
-    st.caption(f"Apify 사용 비용 ({usage['label']}): **${usage['usd']:.2f}**")
 
 available_countries = [c for c in COUNTRY_ORDER if c in df["country"].unique()]
 sel_countries = st.multiselect("🌍 국가 필터 (복수 선택 가능)", options=available_countries, default=available_countries)

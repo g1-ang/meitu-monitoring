@@ -30,7 +30,7 @@ def load_data():
     return df
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=300)
 def load_apify_usage():
     try:
         token = st.secrets.get("APIFY_API_TOKEN", "") or os.getenv("APIFY_API_TOKEN", "")
@@ -42,8 +42,6 @@ def load_apify_usage():
     try:
         now = datetime.now(timezone.utc)
 
-        # 04/17 이전: 토큰 교체일(04/03) 기준
-        # 04/18 이후: 매월 18일 기준 자동 사이클
         if now < datetime(2026, 4, 18, tzinfo=timezone.utc):
             cycle_start = datetime(2026, 4, 3, 0, 0, 0, tzinfo=timezone.utc)
             cycle_end = datetime(2026, 4, 17, 23, 59, 59, tzinfo=timezone.utc)
@@ -55,7 +53,6 @@ def load_apify_usage():
                     cycle_start = now.replace(year=now.year - 1, month=12, day=18, hour=0, minute=0, second=0, microsecond=0)
                 else:
                     cycle_start = now.replace(month=now.month - 1, day=18, hour=0, minute=0, second=0, microsecond=0)
-
             if cycle_start.month == 12:
                 cycle_end = cycle_start.replace(year=cycle_start.year + 1, month=1, day=17)
             else:
@@ -65,15 +62,24 @@ def load_apify_usage():
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=5) as res:
             data = json.loads(res.read())
+
         runs = data.get("data", {}).get("items", [])
         monthly_runs = [
             r for r in runs
             if r.get("startedAt", "") >= cycle_start.strftime("%Y-%m-%d")
         ]
+
+        # 디버깅: usage 관련 필드 확인
+        if monthly_runs:
+            first = monthly_runs[0]
+            usage_fields = {k: v for k, v in first.items() if any(x in k.lower() for x in ["usage", "cost", "usd", "price"])}
+            st.write("Apify 응답 필드 확인:", usage_fields)
+
         total_usd = sum(r.get("usageTotalUsd", 0) or 0 for r in monthly_runs)
         cycle_label = f"{cycle_start.strftime('%m/%d')} ~ {cycle_end.strftime('%m/%d')}"
         return {"usd": total_usd, "label": cycle_label}
-    except Exception:
+    except Exception as e:
+        st.write("Apify 에러:", str(e))
         return None
 
 

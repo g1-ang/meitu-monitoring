@@ -9,8 +9,9 @@ from utils import load_and_process, get_week_range, extract_keywords, fmt, TYPE_
 
 st.set_page_config(page_title="IG Summary", page_icon="📊", layout="wide")
 
-COUNTRY_ORDER = ["한국", "일본", "중국/대만", "태국", "영어권", "유럽", "기타"]
+COUNTRY_ORDER = ["🇰🇷 한국", "🇯🇵 일본", "🇨🇳 중국/대만", "🇹🇭 태국", "🌐 영어권", "🇪🇺 유럽", "🌏 기타"]
 BRAND_KEYWORDS = ["meitu", "메이투", "뷰티캠", "beautycam"]
+
 
 @st.cache_data(ttl=300)
 def load_data():
@@ -31,12 +32,30 @@ def load_data():
 
 @st.cache_data(ttl=3600)
 def load_apify_usage():
-    token = os.getenv("APIFY_API_TOKEN", "")
+    try:
+        token = st.secrets.get("APIFY_API_TOKEN", "") or os.getenv("APIFY_API_TOKEN", "")
+    except Exception:
+        token = os.getenv("APIFY_API_TOKEN", "")
+
     if not token:
         return None
     try:
         now = datetime.now(timezone.utc)
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        # Apify 청구 사이클: 매월 18일 기준
+        if now.day >= 18:
+            cycle_start = now.replace(day=18, hour=0, minute=0, second=0, microsecond=0)
+        else:
+            if now.month == 1:
+                cycle_start = now.replace(year=now.year - 1, month=12, day=18, hour=0, minute=0, second=0, microsecond=0)
+            else:
+                cycle_start = now.replace(month=now.month - 1, day=18, hour=0, minute=0, second=0, microsecond=0)
+
+        if cycle_start.month == 12:
+            cycle_end = cycle_start.replace(year=cycle_start.year + 1, month=1, day=17, hour=23, minute=59, second=59)
+        else:
+            cycle_end = cycle_start.replace(month=cycle_start.month + 1, day=17, hour=23, minute=59, second=59)
+
         url = f"https://api.apify.com/v2/actor-runs?token={token}&limit=200&status=SUCCEEDED"
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=5) as res:
@@ -44,10 +63,11 @@ def load_apify_usage():
         runs = data.get("data", {}).get("items", [])
         monthly_runs = [
             r for r in runs
-            if r.get("startedAt", "") >= month_start.strftime("%Y-%m-%d")
+            if r.get("startedAt", "") >= cycle_start.strftime("%Y-%m-%d")
         ]
         total_usd = sum(r.get("usageTotalUsd", 0) or 0 for r in monthly_runs)
-        return {"count": len(monthly_runs), "usd": total_usd}
+        cycle_label = f"{cycle_start.strftime('%m/%d')} ~ {cycle_end.strftime('%m/%d')}"
+        return {"count": len(monthly_runs), "usd": total_usd, "label": cycle_label}
     except Exception:
         return None
 
@@ -93,7 +113,7 @@ def render_kpi_bar(current_df, compare_df):
         ("📋 전체", len(current_df), len(compare_df)),
         ("🎬 릴스", (current_df["content_type"]=="reel").sum(), (compare_df["content_type"]=="reel").sum()),
         ("🖼️ 피드", current_df["content_type"].isin(["feed","video_feed"]).sum(), compare_df["content_type"].isin(["feed","video_feed"]).sum()),
-        ("한국", current_df["is_korean"].sum(), compare_df["is_korean"].sum()),
+        ("🇰🇷 한국", current_df["is_korean"].sum(), compare_df["is_korean"].sum()),
         ("📢 광고", (current_df["ad_type"]=="📢 광고").sum(), (compare_df["ad_type"]=="📢 광고").sum()),
         ("🌱 오가닉", (current_df["ad_type"]=="🌱 오가닉").sum(), (compare_df["ad_type"]=="🌱 오가닉").sum()),
     ]
@@ -218,10 +238,9 @@ if df["last_updated"].notna().any():
     last_kst = df["last_updated"].max() + pd.Timedelta(hours=9)
     st.caption(f"마지막 수집: **{last_kst.strftime('%Y-%m-%d %H:%M')} KST** | 누적: **{len(df):,}건**")
 
-# Apify 비용 표시
 usage = load_apify_usage()
 if usage:
-    st.caption(f"Apify 이번 달: **${usage['usd']:.2f}** | 실행 {usage['count']}회")
+    st.caption(f"Apify 이번 달 ({usage['label']}): **${usage['usd']:.2f}** | 실행 {usage['count']}회")
 
 available_countries = [c for c in COUNTRY_ORDER if c in df["country"].unique()]
 sel_countries = st.multiselect("🌍 국가 필터 (복수 선택 가능)", options=available_countries, default=available_countries)

@@ -83,7 +83,7 @@ def fetch_twitter():
                 "maxItems": 50,
                 "sort": "Latest",
                 "tweetLanguage": "ko",
-                "_triggeredBy": "미란",
+                "_triggeredBy": "지원",
                 "_project": "메이투 모니터링",
             })
             results = list(client.dataset(run["defaultDatasetId"]).iterate_items())

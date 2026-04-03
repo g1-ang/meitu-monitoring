@@ -58,28 +58,15 @@ def load_apify_usage():
             else:
                 cycle_end = cycle_start.replace(month=cycle_start.month + 1, day=17)
 
-        url = f"https://api.apify.com/v2/actor-runs?token={token}&limit=500"
+        # createdFrom 파라미터로 날짜 필터링
+        created_from = cycle_start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        url = f"https://api.apify.com/v2/actor-runs?token={token}&limit=500&createdFrom={created_from}"
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=5) as res:
             data = json.loads(res.read())
 
         runs = data.get("data", {}).get("items", [])
-
-        monthly_runs = [
-            r for r in runs
-            if r.get("startedAt", "")[:10] >= cycle_start.strftime("%Y-%m-%d")
-        ]
-
-        # 디버깅
-        st.write(f"전체 runs: {len(runs)}개 / 이번 사이클: {len(monthly_runs)}개")
-        if runs:
-            st.write(f"첫 번째 startedAt: {runs[0].get('startedAt', '없음')}")
-        if monthly_runs:
-            first = monthly_runs[0]
-            usage_fields = {k: v for k, v in first.items() if any(x in k.lower() for x in ["usage", "cost", "usd", "price"])}
-            st.write(f"usage 관련 필드: {usage_fields}")
-
-        total_usd = sum(r.get("usageTotalUsd", 0) or 0 for r in monthly_runs)
+        total_usd = sum(r.get("usageTotalUsd", 0) or 0 for r in runs)
         cycle_label = f"{cycle_start.strftime('%m/%d')} ~ {cycle_end.strftime('%m/%d')}"
         return {"usd": total_usd, "label": cycle_label}
     except Exception as e:

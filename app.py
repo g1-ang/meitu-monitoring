@@ -42,21 +42,20 @@ def load_apify_usage():
     try:
         now = datetime.now(timezone.utc)
 
-        # Apify 청구 사이클: 매월 18일 기준
-        if now.day >= 18:
-            cycle_start = now.replace(day=18, hour=0, minute=0, second=0, microsecond=0)
+        # 04/17 이전: 토큰 교체일(04/03) 기준
+        # 04/18 이후: 매월 18일 기준 자동 사이클
+        if now < datetime(2026, 4, 18, tzinfo=timezone.utc):
+            cycle_start = datetime(2026, 4, 3, 0, 0, 0, tzinfo=timezone.utc)
         else:
-            if now.month == 1:
-                cycle_start = now.replace(year=now.year - 1, month=12, day=18, hour=0, minute=0, second=0, microsecond=0)
+            if now.day >= 18:
+                cycle_start = now.replace(day=18, hour=0, minute=0, second=0, microsecond=0)
             else:
-                cycle_start = now.replace(month=now.month - 1, day=18, hour=0, minute=0, second=0, microsecond=0)
+                if now.month == 1:
+                    cycle_start = now.replace(year=now.year - 1, month=12, day=18, hour=0, minute=0, second=0, microsecond=0)
+                else:
+                    cycle_start = now.replace(month=now.month - 1, day=18, hour=0, minute=0, second=0, microsecond=0)
 
-        if cycle_start.month == 12:
-            cycle_end = cycle_start.replace(year=cycle_start.year + 1, month=1, day=17, hour=23, minute=59, second=59)
-        else:
-            cycle_end = cycle_start.replace(month=cycle_start.month + 1, day=17, hour=23, minute=59, second=59)
-
-        url = f"https://api.apify.com/v2/actor-runs?token={token}&limit=200&status=SUCCEEDED"
+        url = f"https://api.apify.com/v2/actor-runs?token={token}&limit=500"
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=5) as res:
             data = json.loads(res.read())
@@ -66,8 +65,15 @@ def load_apify_usage():
             if r.get("startedAt", "") >= cycle_start.strftime("%Y-%m-%d")
         ]
         total_usd = sum(r.get("usageTotalUsd", 0) or 0 for r in monthly_runs)
+
+        # 사이클 종료일 계산
+        if cycle_start.month == 12:
+            cycle_end = cycle_start.replace(year=cycle_start.year + 1, month=1, day=17)
+        else:
+            cycle_end = cycle_start.replace(month=cycle_start.month + 1, day=17)
+
         cycle_label = f"{cycle_start.strftime('%m/%d')} ~ {cycle_end.strftime('%m/%d')}"
-        return {"count": len(monthly_runs), "usd": total_usd, "label": cycle_label}
+        return {"usd": total_usd, "label": cycle_label}
     except Exception:
         return None
 
@@ -240,7 +246,7 @@ if df["last_updated"].notna().any():
 
 usage = load_apify_usage()
 if usage:
-    st.caption(f"Apify 이번 달 ({usage['label']}): **${usage['usd']:.2f}** | 실행 {usage['count']}회")
+    st.caption(f"Apify 사용 비용 ({usage['label']}): **${usage['usd']:.2f}**")
 
 available_countries = [c for c in COUNTRY_ORDER if c in df["country"].unique()]
 sel_countries = st.multiselect("🌍 국가 필터 (복수 선택 가능)", options=available_countries, default=available_countries)

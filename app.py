@@ -64,16 +64,20 @@ def load_apify_usage():
             data = json.loads(res.read())
 
         runs = data.get("data", {}).get("items", [])
+
         monthly_runs = [
             r for r in runs
-            if r.get("startedAt", "") >= cycle_start.strftime("%Y-%m-%d")
+            if r.get("startedAt", "")[:10] >= cycle_start.strftime("%Y-%m-%d")
         ]
 
-        # 디버깅: usage 관련 필드 확인
+        # 디버깅
+        st.write(f"전체 runs: {len(runs)}개 / 이번 사이클: {len(monthly_runs)}개")
+        if runs:
+            st.write(f"첫 번째 startedAt: {runs[0].get('startedAt', '없음')}")
         if monthly_runs:
             first = monthly_runs[0]
             usage_fields = {k: v for k, v in first.items() if any(x in k.lower() for x in ["usage", "cost", "usd", "price"])}
-            st.write("Apify 응답 필드 확인:", usage_fields)
+            st.write(f"usage 관련 필드: {usage_fields}")
 
         total_usd = sum(r.get("usageTotalUsd", 0) or 0 for r in monthly_runs)
         cycle_label = f"{cycle_start.strftime('%m/%d')} ~ {cycle_end.strftime('%m/%d')}"

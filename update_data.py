@@ -136,7 +136,7 @@ def collect(keyword: str, keyword_type: str, results_type: str, client) -> list:
         "resultsLimit": 25,
         "resultsType": results_type,
         "keywordSearch": False,
-        "_triggeredBy": "미란",
+        "_triggeredBy": "지원",
         "_project": "메이투 모니터링",
     })
     results = list(client.dataset(run["defaultDatasetId"]).iterate_items())

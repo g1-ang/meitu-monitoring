@@ -75,29 +75,39 @@ def fetch_twitter():
     try:
         client = ApifyClient(APIFY_TOKEN)
         all_tweets = []
+        failures = []
 
         for keyword in KEYWORDS:
             print(f"'{keyword}' 한국어 트윗 수집 중...")
-            run = client.actor(ACTOR_ID).call(run_input={
-                "searchTerms": [keyword],
-                "maxItems": 50,
-                "sort": "Latest",
-                "tweetLanguage": "ko",
-                "_triggeredBy": "지원",
-                "_project": "메이투 모니터링",
-            })
-            results = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-            count = 0
-            for item in results:
-                if item.get("isRetweet", False):
-                    continue
-                all_tweets.append(normalize_tweet(item, keyword))
-                count += 1
-            print(f" -> {count}건 저장 (리트윗 제외)")
+            try:
+                run = client.actor(ACTOR_ID).call(run_input={
+                    "searchTerms": [keyword],
+                    "maxItems": 50,
+                    "sort": "Latest",
+                    "tweetLanguage": "ko",
+                    "_triggeredBy": "지원",
+                    "_project": "메이투 모니터링",
+                })
+                results = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+                count = 0
+                for item in results:
+                    if item.get("isRetweet", False):
+                        continue
+                    all_tweets.append(normalize_tweet(item, keyword))
+                    count += 1
+                print(f" -> {count}건 저장 (리트윗 제외)")
+            except Exception as e:
+                msg = f"'{keyword}' 실패: {type(e).__name__}: {e}"
+                print(msg)
+                failures.append(msg)
+
+        if failures:
+            print(f"\n부분 실패 {len(failures)}건:")
+            for msg in failures:
+                print(f"  - {msg}")
 
         if not all_tweets:
-            print("수집된 트윗이 없습니다.")
-            return
+            raise RuntimeError("수집된 트윗이 0건입니다 (모든 키워드 실패).")
 
         df = pd.DataFrame(all_tweets)
         for col in ("view_count", "like_count", "retweet_count", "reply_count"):

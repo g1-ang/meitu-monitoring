@@ -150,19 +150,34 @@ def fetch_data():
     try:
         client = ApifyClient(APIFY_TOKEN)
         all_results = []
+        failures = []
 
         print(f"수집 모드: {COLLECT_MODE.upper()}")
 
+        # 키워드 하나가 실패해도 나머지는 계속 수집 (Apify 일시 장애 대응)
+        def safe_collect(kw, kw_type, rtype):
+            try:
+                all_results.extend(collect(kw, kw_type, rtype, client))
+            except Exception as e:
+                msg = f"[{kw_type}] #{kw} [{rtype}] 실패: {type(e).__name__}: {e}"
+                print(msg)
+                failures.append(msg)
+
         for results_type in ("posts", "reels"):
             for keyword in BRAND_KEYWORDS:
-                all_results.extend(collect(keyword, "브랜드", results_type, client))
+                safe_collect(keyword, "브랜드", results_type)
             if COLLECT_MODE == "all":
                 for keyword in CATEGORY_KEYWORDS:
-                    all_results.extend(collect(keyword, "카테고리", results_type, client))
+                    safe_collect(keyword, "카테고리", results_type)
+
+        if failures:
+            print(f"\n부분 실패 {len(failures)}건:")
+            for msg in failures:
+                print(f"  - {msg}")
 
         if not all_results:
-            print("수집된 데이터가 없습니다.")
-            return
+            # 모든 키워드가 실패한 경우에만 워크플로우를 fail 시킴
+            raise RuntimeError("수집된 데이터가 0건입니다 (모든 키워드 실패).")
 
         df = pd.DataFrame(all_results)
         df = normalize(df, all_results)

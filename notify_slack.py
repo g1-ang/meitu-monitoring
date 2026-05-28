@@ -34,7 +34,7 @@ IG_STOPWORDS = {
 }
 
 
-def send_slack(blocks: list):
+def send_slack(blocks: list) -> bool:
     payload = json.dumps({"blocks": blocks}).encode("utf-8")
     req = urllib.request.Request(
         SLACK_WEBHOOK_URL,
@@ -42,8 +42,14 @@ def send_slack(blocks: list):
         headers={"Content-Type": "application/json"},
         method="POST"
     )
-    with urllib.request.urlopen(req) as res:
-        print(f"슬랙 전송 완료: {res.status}")
+    try:
+        with urllib.request.urlopen(req) as res:
+            print(f"슬랙 전송 완료: {res.status}")
+            return True
+    except Exception as e:
+        # 데이터 수집은 끝난 시점이라 슬랙 실패로 워크플로우를 fail 시키지 않음
+        print(f"슬랙 전송 실패 (무시하고 계속): {type(e).__name__}: {e}")
+        return False
 
 
 def load_instagram() -> pd.DataFrame:

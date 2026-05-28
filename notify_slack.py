@@ -13,8 +13,25 @@ REEL_VIEW_MIN = 10000
 FEED_LIKE_MIN = 500
 
 BRAND_KEYWORDS = ["meitu", "메이투", "뷰티캠", "beautycam"]
+MEITU_BRAND = ["meitu", "메이투"]
+BEAUTYCAM_BRAND = ["뷰티캠", "beautycam"]
+
 AD_PATTERNS = ["광고", "협찬", "유료광고", "제공", "콜라보", "파트너십",
                "ad", "sponsored", "collaboration", "paid", "pr", "promotion"]
+
+# 메이투 앱 기능 사전 — 캡션/트윗에 등장하면 매칭
+MEITU_FEATURES = [
+    "중안부", "오토윤곽", "리터치", "슬림", "인중", "비율",
+    "헤어보정", "헤어", "염색", "메이크업", "필터",
+    "AI효과", "AI아트", "AI보정", "얼굴보정",
+]
+
+# 뷰티캠 콘텐츠/기능 사전
+BEAUTYCAM_CONTENTS = [
+    "AI영상효과", "길거리인터뷰", "잠금화면꾸미기", "굿즈만들기",
+    "마그넷", "AI효과", "AI아트", "AI보정",
+    "셀카", "필터", "스티커",
+]
 
 DASHBOARD_URL = "https://meitu-monitoring.streamlit.app"
 DETAILS_URL = "https://meitu-monitoring.streamlit.app/details"
@@ -24,6 +41,12 @@ TW_STOPWORDS = {
     "fyp", "foryou", "viral", "reels", "reel",
     "광고", "협찬", "진짜", "너무", "그냥", "사진", "이거",
     "ㅋㅋ", "ㅠㅠ", "ㅎㅎ", "rt", "팔로우", "좋아요",
+    "그리고", "그래서", "그래도", "오늘", "어제", "내일", "지금", "이번",
+    "써요", "있어", "없어", "하는", "있는", "되는", "라는", "라고", "라며",
+    "이런", "저런", "그런", "거든요", "위해", "통해", "한국", "사람",
+    "정말", "엄청", "완전", "최고", "이게", "저게", "그게",
+    "죽은", "사진도", "사진은",
+    "보정", "보정꿀팁", "효과", "유료", "메이투보정", "기본",
 }
 
 IG_STOPWORDS = {
@@ -31,6 +54,7 @@ IG_STOPWORDS = {
     "fyp", "foryou", "viral", "reels", "reel", "love", "like",
     "follow", "share", "instagram", "insta", "photo", "video",
     "좋아요", "팔로우", "댓글", "공유", "인스타", "인스타그램",
+    "보정", "보정꿀팁", "효과", "유료", "메이투보정", "기본",
 }
 
 
@@ -140,6 +164,41 @@ def filter_range(df: pd.DataFrame, date_col: str, start, end) -> pd.DataFrame:
     return df[(df[date_col] >= start) & (df[date_col] < end)].copy()
 
 
+def extract_top_terms(texts, dictionary, stopwords, top_n: int = 5) -> list:
+    """사전 매칭 우선, 부족하면 해시태그/한글 명사로 보충."""
+    text_lower = [str(t).lower() for t in texts if t and str(t) != "nan"]
+    if not text_lower:
+        return []
+
+    counter = Counter()
+    for term in dictionary:
+        c = sum(1 for t in text_lower if term.lower() in t)
+        if c:
+            counter[term] = c
+
+    if len(counter) < top_n:
+        used = {k.lower() for k in counter}
+        for t in text_lower:
+            for tag in re.findall(r'#([가-힣a-zA-Z0-9_]+)', t):
+                if (tag in stopwords or len(tag) < 2 or
+                    re.fullmatch(r'\d+', tag) or tag.lower() in used):
+                    continue
+                counter[tag] += 1
+            for word in re.findall(r'[가-힣]{2,}', t):
+                if word in stopwords or word.lower() in used:
+                    continue
+                counter[word] += 1
+
+    return [k for k, _ in counter.most_common(top_n)]
+
+
+def fmt_terms(terms: list, min_sample: int = 0, sample_size: int = 0) -> str:
+    # 샘플이 너무 적으면 노이즈 추출되므로 생략
+    if min_sample and sample_size < min_sample:
+        return f"_데이터 부족 (트윗 {sample_size}건)_"
+    return " ".join(f"`{t}`" for t in terms) if terms else "_해당 없음_"
+
+
 def format_caption_ig(text: str, max_len: int = 55) -> str:
     if not text or str(text) in ("nan", ""):
         return ""
@@ -206,37 +265,41 @@ def build_tw_top_blocks(df_tw: pd.DataFrame) -> list:
     if df_brand.empty:
         return [{"type": "section", "text": {"type": "mrkdwn", "text": "_해당 키워드 트윗 없음_"}}]
 
-    def build_top3_lines(df_sorted, metric_col, metric_label):
+    def build_lines(df_sorted, metric_col, metric_label, n):
         lines = []
-        for i, (_, row) in enumerate(df_sorted.head(3).iterrows(), 1):
+        for i, (_, row) in enumerate(df_sorted.head(n).iterrows(), 1):
             caption = format_caption_tw(str(row.get("text", "")))
             caption_line = f"\n> _{caption}_" if caption else ""
+            prefix = f"*{i}위* " if n > 1 else ""
             lines.append(
-                f"*{i}위* @{row.get('author_handle', '-')} | {metric_label} {fmt(row[metric_col])}{caption_line}\n{row.get('url', '')}"
+                f"{prefix}@{row.get('author_handle', '-')} | {metric_label} {fmt(row[metric_col])}{caption_line}\n{row.get('url', '')}"
             )
         return lines
 
     blocks = []
 
-    like_lines = build_top3_lines(df_brand.nlargest(3, "like_count"), "like_count", "좋아요")
+    like_lines = build_lines(df_brand.nlargest(1, "like_count"), "like_count", "좋아요", 1)
     blocks.append({"type": "section", "text": {"type": "mrkdwn",
-        "text": "*좋아요 TOP 3* (최근 7일)\n" + ("\n".join(like_lines) if like_lines else "_해당 없음_")}})
+        "text": "*좋아요 TOP 1* (최근 7일)\n" + ("\n".join(like_lines) if like_lines else "_해당 없음_")}})
 
-    rt_lines = build_top3_lines(df_brand.nlargest(3, "retweet_count"), "retweet_count", "리트윗")
+    rt_lines = build_lines(df_brand.nlargest(1, "retweet_count"), "retweet_count", "리트윗", 1)
     blocks.append({"type": "section", "text": {"type": "mrkdwn",
-        "text": "*리트윗 TOP 3* (최근 7일)\n" + ("\n".join(rt_lines) if rt_lines else "_해당 없음_")}})
+        "text": "*리트윗 TOP 1* (최근 7일)\n" + ("\n".join(rt_lines) if rt_lines else "_해당 없음_")}})
 
     ad_tweets = df_brand[df_brand["text"].apply(is_ad)] if "text" in df_brand.columns else pd.DataFrame()
+    # 좋아요 + 리트윗 = 0인 트윗은 의미 없으므로 제외
+    if not ad_tweets.empty:
+        ad_tweets = ad_tweets[(ad_tweets["like_count"] + ad_tweets["retweet_count"]) > 0]
     if not ad_tweets.empty:
         ad_lines = []
-        for _, row in ad_tweets.nlargest(3, "like_count").iterrows():
+        for i, (_, row) in enumerate(ad_tweets.nlargest(3, "like_count").iterrows(), 1):
             caption = format_caption_tw(str(row.get("text", "")))
             caption_line = f"\n> _{caption}_" if caption else ""
             ad_lines.append(
-                f"@{row.get('author_handle', '-')} | 좋아요 {fmt(row['like_count'])} - 리트윗 {fmt(row['retweet_count'])}{caption_line}\n{row.get('url', '')}"
+                f"*{i}위* @{row.get('author_handle', '-')} | 좋아요 {fmt(row['like_count'])} - 리트윗 {fmt(row['retweet_count'])}{caption_line}\n{row.get('url', '')}"
             )
         blocks.append({"type": "section", "text": {"type": "mrkdwn",
-            "text": "*광고 언급 트윗* (광고/협찬/sponsored 표현 포함)\n" + "\n".join(ad_lines)}})
+            "text": "*광고 언급 TOP 3* (광고/협찬/sponsored 표현 포함)\n" + "\n".join(ad_lines)}})
 
     return blocks
 
@@ -260,35 +323,52 @@ def notify_weekly_report(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     cur_feed  = ig_cur_brand["content_type"].isin(["feed", "video_feed"]).sum()
     prev_feed = ig_prev_brand["content_type"].isin(["feed", "video_feed"]).sum()
 
+    ig_meitu_captions = ig_cur_brand[ig_cur_brand["search_keyword"].isin(MEITU_BRAND)]["caption"].dropna().tolist() if "search_keyword" in ig_cur_brand.columns else []
+    ig_beauty_captions = ig_cur_brand[ig_cur_brand["search_keyword"].isin(BEAUTYCAM_BRAND)]["caption"].dropna().tolist() if "search_keyword" in ig_cur_brand.columns else []
+    meitu_feats = extract_top_terms(ig_meitu_captions, MEITU_FEATURES, IG_STOPWORDS)
+    beauty_contents = extract_top_terms(ig_beauty_captions, BEAUTYCAM_CONTENTS, IG_STOPWORDS)
+
     tw_cur  = filter_range(tw_df, "created_at", start, end) if not tw_df.empty else pd.DataFrame()
     tw_prev = filter_range(tw_df, "created_at", prev_start, prev_end) if not tw_df.empty else pd.DataFrame()
 
     def tw_cnt(df, kws):
         return len(df[df["search_keyword"].isin(kws)]) if not df.empty and "search_keyword" in df.columns else 0
 
-    cur_meitu   = tw_cnt(tw_cur,  ["meitu", "메이투"])
-    prev_meitu  = tw_cnt(tw_prev, ["meitu", "메이투"])
-    cur_beauty  = tw_cnt(tw_cur,  ["뷰티캠"])
-    prev_beauty = tw_cnt(tw_prev, ["뷰티캠"])
+    cur_meitu   = tw_cnt(tw_cur,  MEITU_BRAND)
+    prev_meitu  = tw_cnt(tw_prev, MEITU_BRAND)
+    cur_beauty  = tw_cnt(tw_cur,  BEAUTYCAM_BRAND)
+    prev_beauty = tw_cnt(tw_prev, BEAUTYCAM_BRAND)
+
+    tw_meitu_texts = tw_cur[tw_cur["search_keyword"].isin(MEITU_BRAND)]["text"].dropna().tolist() if not tw_cur.empty and "search_keyword" in tw_cur.columns else []
+    tw_beauty_texts = tw_cur[tw_cur["search_keyword"].isin(BEAUTYCAM_BRAND)]["text"].dropna().tolist() if not tw_cur.empty and "search_keyword" in tw_cur.columns else []
+    # 트위터 키워드는 사전 없이 자동 추출 위주 (브랜드별 마케팅 톤 파악용)
+    tw_meitu_terms = extract_top_terms(tw_meitu_texts, MEITU_FEATURES, TW_STOPWORDS)
+    tw_beauty_terms = extract_top_terms(tw_beauty_texts, BEAUTYCAM_CONTENTS, TW_STOPWORDS)
 
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": f"Meitu 주간 리포트 ({get_day_label()})", "emoji": True}},
         {"type": "context", "elements": [{"type": "mrkdwn",
             "text": f"발송: *{now_kst.strftime('%Y-%m-%d %H:%M')} KST* | 기간: {get_report_label()} | 한국 - 경쟁사 키워드 기준"}]},
         {"type": "divider"},
+        {"type": "section", "text": {"type": "mrkdwn", "text": "*[경쟁사 마케팅 요약]*"}},
         {"type": "section", "text": {"type": "mrkdwn", "text": (
-            f"*인스타그램 (한국 - 경쟁사)*\n"
-            f"릴스: *{cur_reel}건* ({delta_str(cur_reel, prev_reel)}) | "
-            f"피드: *{cur_feed}건* ({delta_str(cur_feed, prev_feed)})"
+            f"*인스타그램*\n"
+            f"릴스: *{cur_reel}건* ({delta_str(cur_reel, prev_reel)})  |  "
+            f"피드: *{cur_feed}건* ({delta_str(cur_feed, prev_feed)})\n"
+            f"메이투: {fmt_terms(meitu_feats)} 기능으로 마케팅 중\n"
+            f"뷰티캠: {fmt_terms(beauty_contents)} 콘텐츠로 마케팅 중"
         )}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": (
+            f"*트위터*\n"
+            f"메이투: *{cur_meitu}건* ({delta_str(cur_meitu, prev_meitu)})  |  "
+            f"뷰티캠: *{cur_beauty}건* ({delta_str(cur_beauty, prev_beauty)})\n"
+            f"메이투: {fmt_terms(tw_meitu_terms, min_sample=5, sample_size=cur_meitu)} 키워드로 마케팅 중\n"
+            f"뷰티캠: {fmt_terms(tw_beauty_terms, min_sample=5, sample_size=cur_beauty)} 키워드로 마케팅 중"
+        )}},
+        {"type": "divider"},
+        {"type": "section", "text": {"type": "mrkdwn", "text": "*[콘텐츠 내용]*"}},
     ]
     blocks += build_ig_top3_blocks(ig_cur_kr)
-    blocks.append({"type": "divider"})
-    blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": (
-        f"*트위터 (한국 - 경쟁사)*\n"
-        f"meitu+메이투: *{cur_meitu}건* ({delta_str(cur_meitu, prev_meitu)}) | "
-        f"뷰티캠: *{cur_beauty}건* ({delta_str(cur_beauty, prev_beauty)})"
-    )}})
     blocks += build_tw_top_blocks(tw_cur)
     blocks += [
         {"type": "divider"},

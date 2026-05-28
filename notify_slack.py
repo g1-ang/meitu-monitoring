@@ -268,8 +268,8 @@ def notify_weekly_report(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
 
     cur_meitu   = tw_cnt(tw_cur,  ["meitu", "메이투"])
     prev_meitu  = tw_cnt(tw_prev, ["meitu", "메이투"])
-    cur_beauty  = tw_cnt(tw_cur,  ["뷰티캠"])
-    prev_beauty = tw_cnt(tw_prev, ["뷰티캠"])
+    cur_beauty  = tw_cnt(tw_cur,  ["뷰티캠", "beautycam"])
+    prev_beauty = tw_cnt(tw_prev, ["뷰티캠", "beautycam"])
 
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": f"Meitu 주간 리포트 ({get_day_label()})", "emoji": True}},
@@ -287,7 +287,7 @@ def notify_weekly_report(ig_df: pd.DataFrame, tw_df: pd.DataFrame):
     blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": (
         f"*트위터 (한국 - 경쟁사)*\n"
         f"meitu+메이투: *{cur_meitu}건* ({delta_str(cur_meitu, prev_meitu)}) | "
-        f"뷰티캠: *{cur_beauty}건* ({delta_str(cur_beauty, prev_beauty)})"
+        f"뷰티캠+beautycam: *{cur_beauty}건* ({delta_str(cur_beauty, prev_beauty)})"
     )}})
     blocks += build_tw_top_blocks(tw_cur)
     blocks += [

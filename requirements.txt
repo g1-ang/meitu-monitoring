@@ -1,4 +1,4 @@
 streamlit
 pandas
-apify-client
+apify-client<3
 plotly

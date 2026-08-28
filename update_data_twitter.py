@@ -7,7 +7,7 @@ from datetime import datetime
 APIFY_TOKEN = os.getenv('APIFY_API_TOKEN')
 ACTOR_ID = "apidojo/tweet-scraper"
 OUTPUT_PATH = "data/latest_twitter.csv"
-KEYWORDS = ["meitu", "메이투", "뷰티캠"]
+KEYWORDS = ["meitu", "메이투", "뷰티캠", "beautycam"]
 
 def extract_image_url(item: dict) -> str:
     extended = item.get("extendedEntities", {}) or {}
